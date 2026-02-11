@@ -29,36 +29,89 @@ Monitor long-running processes on remote servers, get intelligent alerts when th
 - Formatted Telegram messages
 - Emoji indicators 🔴🟡🟢
 
-## Quick Start
+## 🚀 Quick Start
 
-### Installation
+### One-Command Setup
 
-```bash
-# Clone repository
-git clone https://github.com/DevCrewX/TelegramRemoteProgressBot.git
-cd TelegramRemoteProgressBot
-
-# Run installation script
-bash install.sh
-
-# Or install manually
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .
-```
-
-### Setup
+Run the interactive setup wizard - it will guide you through everything:
 
 ```bash
-# Interactive setup wizard
 bot-monitor setup
 ```
 
-This will guide you through:
-1. Getting your Telegram bot token from [@BotFather](https://t.me/BotFather)
-2. Finding your Telegram chat ID from [@userinfobot](https://t.me/userinfobot)
-3. Configuring your LLM provider
-4. Setting up monitors
+**The wizard will:**
+1. ✅ Collect and validate Telegram credentials (sends test message!)
+2. ✅ Choose LLM provider and test API key
+3. ✅ Configure monitors (files, PIDs, systemd services)
+4. ✅ Validate file permissions and process access
+5. ✅ Save complete working configuration
+6. ✅ Offer to start monitoring immediately
+
+**Example Session:**
+```
+🤖 Bot Monitor Setup Wizard
+========================================
+
+[1/5] Telegram Bot Configuration
+----------------------------------------
+To create a Telegram bot:
+  1. Open Telegram and search for @BotFather
+  2. Send: /newbot
+  3. Follow instructions to create bot
+  4. Copy the bot token
+
+Enter Telegram Bot Token: 123456:ABC-DEF...
+Enter your Telegram Chat ID: 987654321
+✓ Validating Telegram setup...
+✓ Success! Test message sent to Telegram!
+
+[2/5] LLM Provider Configuration
+----------------------------------------
+Choose your LLM provider:
+  1) OpenAI (Recommended, ~$0.15/1M tokens)
+  2) Anthropic (High quality, ~$0.25/1M tokens)
+  3) Groq (FREE tier, fast)
+  4) Ollama (Local, private, FREE)
+
+Choice [1-4]: 3
+✓ Testing API key...
+✓ API key validated! Model: llama-3.3-70b-versatile
+
+[3/5] Monitor Configuration
+----------------------------------------
+Monitor log files? [Y/n]: y
+  File path: /var/log/myapp.log
+  ✓ File found and readable
+  Keywords to watch (comma-separated) [ERROR,FATAL,Exception]: 
+  Monitor name [myapp.log]: 
+  ✓ File monitor configured: myapp.log
+
+[4/5] Notification Settings
+----------------------------------------
+Max notifications per hour [10]: 15
+✓ Rate limit: 15/hour
+
+[5/5] Save Configuration
+----------------------------------------
+Configuration Summary:
+  • Telegram: ✓ Bot configured
+  • LLM: ✓ Groq (llama-3.3-70b-versatile)
+  • Monitors: 1 configured
+  • Rate limit: 15/hour
+
+Save to ~/.config/bot-monitor/config.yaml? [Y/n]: y
+✓ Configuration saved!
+
+🚀 Setup complete! What next?
+  1) Start monitoring now
+  2) Exit (start manually later)
+
+Choice [1-2]: 1
+
+Starting bot-monitor...
+✓ File monitor: myapp.log
+✓ Monitoring active. Press Ctrl+C to stop.
+```
 
 ### Configuration
 
