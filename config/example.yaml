@@ -1,0 +1,42 @@
+# Bot Monitor Configuration
+
+telegram:
+  # Get bot token from @BotFather on Telegram
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  # Your Telegram chat ID (use bot-monitor setup to find it)
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+llm:
+  # Provider: openai, anthropic, groq, ollama
+  provider: "openai"
+  api_key: "${LLM_API_KEY}"
+  model: "gpt-4o-mini"
+  # Optional: for Ollama or custom endpoints
+  base_url: null
+
+notification:
+  # Debounce period in seconds (group similar events)
+  debounce_seconds: 300
+  # Maximum notifications per hour
+  rate_limit_per_hour: 10
+  # Which severity levels to send
+  severity_levels: [critical, warning, info]
+
+monitors:
+  # Monitor a log file
+  - type: file
+    name: "Application Logs"
+    path: "/var/log/myapp.log"
+    keywords: ["ERROR", "FATAL", "Exception", "Traceback"]
+  
+  # Monitor a process by PID
+  - type: pid
+    name: "Training Process"
+    pid: 12345
+    check_interval: 30
+  
+  # Monitor systemd journal
+  - type: journal
+    name: "Web Service"
+    unit: "nginx.service"
+    since: "5 minutes ago"

@@ -1,0 +1,149 @@
+"""File and log monitoring."""
+
+import re
+import time
+import threading
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+
+from .base import BaseMonitor, Severity
+
+
+class FileMonitor(BaseMonitor):
+    """Monitor log files for specific patterns."""
+    
+    def __init__(self, name: str, config: Dict[str, Any]):
+        """Initialize file monitor.
+        
+        Args:
+            name: Monitor name.
+            config: Configuration with 'path' and optional 'keywords'.
+        """
+        super().__init__(name, config)
+        
+        self.file_path = Path(config["path"])
+        if not self.file_path.exists():
+            raise ValueError(f"File not found: {self.file_path}")
+        
+        # Compile keyword patterns
+        keywords = config.get("keywords", [])
+        if keywords:
+            pattern = "|".join(f"({re.escape(k)})" for k in keywords)
+            self.pattern = re.compile(pattern, re.IGNORECASE)
+        else:
+            self.pattern = None
+        
+        self.observer: Optional[Observer] = None
+        self.file_position = 0
+        self._lock = threading.Lock()
+    
+    def start(self):
+        """Start monitoring the file."""
+        if self._running:
+            return
+        
+        self._running = True
+        
+        # Get initial file position (start from end)
+        with open(self.file_path, "r") as f:
+            f.seek(0, 2)  # Seek to end
+            self.file_position = f.tell()
+        
+        # Set up file watcher
+        event_handler = FileChangeHandler(self)
+        self.observer = Observer()
+        self.observer.schedule(
+            event_handler,
+            str(self.file_path.parent),
+            recursive=False
+        )
+        self.observer.start()
+    
+    def stop(self):
+        """Stop monitoring."""
+        if not self._running:
+            return
+        
+        self._running = False
+        
+        if self.observer:
+            self.observer.stop()
+            self.observer.join()
+            self.observer = None
+    
+    def process_new_lines(self):
+        """Process new lines added to file."""
+        with self._lock:
+            try:
+                with open(self.file_path, "r") as f:
+                    f.seek(self.file_position)
+                    new_lines = f.readlines()
+                    self.file_position = f.tell()
+                
+                # Process each line
+                for line in new_lines:
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                    
+                    # Check if matches pattern
+                    if self.pattern:
+                        if self.pattern.search(line):
+                            severity = self._classify_severity(line)
+                            self._emit_event(line, severity)
+                    else:
+                        # Emit all lines if no pattern
+                        severity = self._classify_severity(line)
+                        self._emit_event(line, severity)
+            
+            except Exception as e:
+                self._emit_event(
+                    f"Error reading file: {e}",
+                    Severity.WARNING,
+                    {"error": str(e)}
+                )
+    
+    def _classify_severity(self, line: str) -> Severity:
+        """Classify line severity based on content.
+        
+        Args:
+            line: Log line.
+            
+        Returns:
+            Severity level.
+        """
+        line_upper = line.upper()
+        
+        if any(word in line_upper for word in ["FATAL", "CRITICAL", "SEGFAULT", "PANIC"]):
+            return Severity.CRITICAL
+        elif any(word in line_upper for word in ["ERROR", "EXCEPTION", "FAILED", "TRACEBACK"]):
+            return Severity.WARNING
+        else:
+            return Severity.INFO
+
+
+class FileChangeHandler(FileSystemEventHandler):
+    """Handle file system events."""
+    
+    def __init__(self, file_monitor: FileMonitor):
+        """Initialize handler.
+        
+        Args:
+            file_monitor: Parent file monitor.
+        """
+        self.file_monitor = file_monitor
+    
+    def on_modified(self, event):
+        """Handle file modification event.
+        
+        Args:
+            event: File system event.
+        """
+        if event.is_directory:
+            return
+        
+        # Check if it's our file
+        if Path(event.src_path) == self.file_monitor.file_path:
+            self.file_monitor.process_new_lines()

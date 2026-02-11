@@ -1,0 +1,145 @@
+"""Telegram notification system."""
+
+import time
+from collections import deque
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+from telegram import Bot
+from telegram.error import TelegramError
+
+from ..monitors.base import Severity
+from ..analyzers.event_analyzer import Analysis
+
+
+class TelegramNotifier:
+    """Send notifications via Telegram."""
+    
+    SEVERITY_EMOJI = {
+        Severity.CRITICAL: "🔴",
+        Severity.WARNING: "🟡",
+        Severity.INFO: "🟢",
+    }
+    
+    def __init__(self, bot_token: str, chat_id: str, 
+                 rate_limit_per_hour: int = 10):
+        """Initialize notifier.
+        
+        Args:
+            bot_token: Telegram bot token.
+            chat_id: Chat ID to send messages to.
+            rate_limit_per_hour: Maximum messages per hour.
+        """
+        self.bot = Bot(token=bot_token)
+        self.chat_id = chat_id
+        self.rate_limit = rate_limit_per_hour
+        
+        # Track message timestamps for rate limiting
+        self.message_times: deque = deque()
+    
+    def send_analysis(self, analysis: Analysis) -> bool:
+        """Send analysis as notification.
+        
+        Args:
+            analysis: Analysis to send.
+            
+        Returns:
+            True if sent successfully.
+        """
+        # Check rate limit
+        if not self._check_rate_limit():
+            print(f"Rate limit exceeded, skipping notification")
+            return False
+        
+        # Format message
+        message = self._format_message(analysis)
+        
+        # Send
+        try:
+            self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode="Markdown",
+            )
+            
+            # Record send time
+            self.message_times.append(datetime.now())
+            return True
+        
+        except TelegramError as e:
+            print(f"Failed to send Telegram message: {e}")
+            return False
+    
+    def send_test_message(self) -> bool:
+        """Send a test message.
+        
+        Returns:
+            True if sent successfully.
+        """
+        try:
+            self.bot.send_message(
+                chat_id=self.chat_id,
+                text="🤖 *Bot Monitor Test*\n\nYour monitoring system is configured correctly!",
+                parse_mode="Markdown",
+            )
+            return True
+        except TelegramError as e:
+            print(f"Test message failed: {e}")
+            return False
+    
+    def _check_rate_limit(self) -> bool:
+        """Check if we can send another message.
+        
+        Returns:
+            True if under rate limit.
+        """
+        now = datetime.now()
+        cutoff = now - timedelta(hours=1)
+        
+        # Remove old timestamps
+        while self.message_times and self.message_times[0] < cutoff:
+            self.message_times.popleft()
+        
+        # Check if under limit
+        return len(self.message_times) < self.rate_limit
+    
+    def _format_message(self, analysis: Analysis) -> str:
+        """Format analysis as Telegram message.
+        
+        Args:
+            analysis: Analysis to format.
+            
+        Returns:
+            Formatted message.
+        """
+        emoji = self.SEVERITY_EMOJI.get(analysis.severity, "⚪")
+        severity_text = analysis.severity.value.upper()
+        
+        event = analysis.original_event
+        
+        # Build message
+        lines = [
+            f"{emoji} *{severity_text}: {analysis.summary}*",
+            "",
+            f"*Source:* {event.source}",
+            f"*Time:* {event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+        ]
+        
+        # Add analysis
+        if analysis.root_cause and analysis.root_cause != "Unknown":
+            lines.append(f"*Root Cause:*\n{analysis.root_cause}")
+            lines.append("")
+        
+        # Add original content (truncated)
+        content = event.content[:300]
+        if len(event.content) > 300:
+            content += "..."
+        
+        lines.append(f"*Event:*\n```\n{content}\n```")
+        lines.append("")
+        
+        # Add suggested action
+        if analysis.suggested_action:
+            lines.append(f"*Action:* {analysis.suggested_action}")
+        
+        return "\n".join(lines)
