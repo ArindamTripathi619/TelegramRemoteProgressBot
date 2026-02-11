@@ -58,7 +58,15 @@ class OpenAIClient(BaseLLMClient):
             )
             return response.choices[0].message.content or ""
         except Exception as e:
-            raise LLMError(f"OpenAI API error: {e}")
+            error_msg = str(e).lower()
+            # Detect quota/billing issues
+            if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits"]):
+                raise LLMError(f"QUOTA_EXHAUSTED: {e}")
+            # Detect authentication issues
+            elif any(word in error_msg for word in ["invalid", "authentication", "api key", "unauthorized"]):
+                raise LLMError(f"AUTH_ERROR: {e}")
+            else:
+                raise LLMError(f"OpenAI API error: {e}")
 
 
 class AnthropicClient(BaseLLMClient):
@@ -92,7 +100,13 @@ class AnthropicClient(BaseLLMClient):
             )
             return response.content[0].text
         except Exception as e:
-            raise LLMError(f"Anthropic API error: {e}")
+            error_msg = str(e).lower()
+            if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits"]):
+                raise LLMError(f"QUOTA_EXHAUSTED: {e}")
+            elif any(word in error_msg for word in ["invalid", "authentication", "api key", "unauthorized"]):
+                raise LLMError(f"AUTH_ERROR: {e}")
+            else:
+                raise LLMError(f"Anthropic API error: {e}")
 
 
 class GroqClient(BaseLLMClient):
@@ -127,7 +141,13 @@ class GroqClient(BaseLLMClient):
             )
             return response.choices[0].message.content or ""
         except Exception as e:
-            raise LLMError(f"Groq API error: {e}")
+            error_msg = str(e).lower()
+            if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits"]):
+                raise LLMError(f"QUOTA_EXHAUSTED: {e}")
+            elif any(word in error_msg for word in ["invalid", "authentication", "api key", "unauthorized"]):
+                raise LLMError(f"AUTH_ERROR: {e}")
+            else:
+                raise LLMError(f"Groq API error: {e}")
 
 
 class OllamaClient(BaseLLMClient):
@@ -163,7 +183,11 @@ class OllamaClient(BaseLLMClient):
             response.raise_for_status()
             return response.json()["message"]["content"]
         except Exception as e:
-            raise LLMError(f"Ollama API error: {e}")
+            error_msg = str(e).lower()
+            if "connection" in error_msg or "timeout" in error_msg:
+                raise LLMError(f"CONNECTION_ERROR: Ollama server not reachable at {self.base_url}")
+            else:
+                raise LLMError(f"Ollama API error: {e}")
 
 
 def create_llm_client(config: Dict[str, Any]) -> BaseLLMClient:

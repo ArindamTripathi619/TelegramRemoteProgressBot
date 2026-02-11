@@ -60,14 +60,37 @@ class EventAnalyzer:
             return analysis
         
         except LLMError as e:
-            # Fallback to basic analysis if LLM fails
-            return Analysis(
-                severity=event.severity,
-                summary=event.content[:100],
-                root_cause=f"LLM analysis failed: {e}",
-                suggested_action="Manual investigation required",
-                original_event=event
-            )
+            error_str = str(e)
+            
+            # Check for quota exhaustion
+            if "QUOTA_EXHAUSTED" in error_str:
+                return Analysis(
+                    severity=Severity.CRITICAL,
+                    summary="⚠️ LLM API QUOTA EXHAUSTED",
+                    root_cause="Your LLM API quota/credits have been exhausted. Analysis is temporarily disabled.",
+                    suggested_action="Update your API key in config: ~/.config/bot-monitor/config.yaml, then restart bot-monitor",
+                    original_event=event
+                )
+            
+            # Check for auth errors
+            elif "AUTH_ERROR" in error_str:
+                return Analysis(
+                    severity=Severity.CRITICAL,
+                    summary="⚠️ LLM API AUTHENTICATION FAILED",
+                    root_cause="Invalid or expired API key.",
+                    suggested_action="Update your API key in config: ~/.config/bot-monitor/config.yaml, then restart bot-monitor",
+                    original_event=event
+                )
+            
+            # Generic LLM failure - use basic analysis
+            else:
+                return Analysis(
+                    severity=event.severity,
+                    summary=event.content[:100],
+                    root_cause=f"LLM analysis failed: {e}",
+                    suggested_action="Check LLM configuration or use basic severity classification",
+                    original_event=event
+                )
     
     def _build_prompt(self, event: MonitorEvent, context: List[MonitorEvent]) -> str:
         """Build analysis prompt.
