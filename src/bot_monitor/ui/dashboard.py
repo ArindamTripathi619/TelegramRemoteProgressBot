@@ -59,16 +59,28 @@ class Dashboard:
             border_style="green"
         )
         
-    def generate_stats(self, uptime: str, tokens: dict):
+    def generate_stats(self, token_stats: dict):
         """Generate statistics panel."""
         table = Table(show_header=False, expand=True, box=None)
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="white")
         
-        table.add_row("⏱️  Uptime", uptime)
-        table.add_row("🧠 LLM Calls", str(tokens.get("calls", 0)))
-        table.add_row("🎟️  Tokens", str(tokens.get("total_tokens", 0)))
-        table.add_row("💾 Cache Hits", f"{tokens.get('cache_hits', 0)}%")
+        # Calculate uptime
+        uptime_sec = token_stats.get("uptime_seconds", 0)
+        hours = uptime_sec // 3600
+        minutes = (uptime_sec % 3600) // 60
+        seconds = uptime_sec % 60
+        if hours > 0:
+            uptime_str = f"{hours}h {minutes}m"
+        elif minutes > 0:
+            uptime_str = f"{minutes}m {seconds}s"
+        else:
+            uptime_str = f"{seconds}s"
+            
+        table.add_row("⏱️  Uptime", uptime_str)
+        table.add_row("🧠 LLM Calls", str(token_stats.get("llm_calls", 0)))
+        table.add_row("🎟️  Tokens", str(token_stats.get("total_tokens", 0)))
+        table.add_row("💾 Cache Hits", f"{token_stats.get('cache_hit_rate', 0)}%")
         
         return Panel(
             table,
@@ -100,7 +112,7 @@ class Dashboard:
         """Update the entire layout."""
         self.layout["header"].update(self.generate_header(state.process_name, state.status))
         self.layout["left"].update(self.generate_progress(state.progress, state.message))
-        self.layout["right"].update(self.generate_stats("0s", token_stats)) # TODO: Calc uptime
+        self.layout["right"].update(self.generate_stats(token_stats)) 
         # self.layout["main"]["bottom"].update(self.generate_logs(recent_logs)) # If we split left further
         self.layout["footer"].update(self.generate_footer())
         

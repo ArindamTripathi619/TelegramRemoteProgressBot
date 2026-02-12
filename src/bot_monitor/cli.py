@@ -168,7 +168,6 @@ class MonitorManager:
                     try:
                         # Feed log line to progress tracker
                         if self.progress_tracker and hasattr(event, 'content'):
-                            print(f"[DEBUG] Event content: {event.content!r}")
                             self.progress_tracker.add_log_line(event.content)
                         
                         # Analyze event (skip if it's just a progress update)
@@ -232,6 +231,11 @@ class MonitorManager:
                     self.message_listener.poll_once()
                 except Exception as e:
                     print(f"Message polling error: {e}")
+            
+            # Frequent UI update (every loop ~1s)
+            if self.ui_callback:
+                current_pct = self.progress_tracker.current_percentage if self.progress_tracker else 0.0
+                self.ui_callback(current_pct, "Monitoring active")
             
             # Sleep briefly
             time.sleep(1)
@@ -442,7 +446,7 @@ def cmd_setup(args):
     config_data["progress_tracking"] = {
         "enabled": True,
         "update_interval_percent": 10,
-        "min_update_interval_seconds": 300
+        "min_update_interval_seconds": 60
     }
     
     # Enable interactive features
