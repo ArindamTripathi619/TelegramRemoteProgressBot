@@ -3,6 +3,7 @@
 import json
 from typing import Dict, Any, List
 from dataclasses import dataclass
+from collections import deque
 
 from ..monitors.base import MonitorEvent, Severity
 from .llm_client import BaseLLMClient, LLMError
@@ -32,7 +33,8 @@ class EventAnalyzer:
         """
         self.llm_client = llm_client
         self.context_size = context_size
-        self.event_history: List[MonitorEvent] = []
+        # Limit history to 50 events to prevent memory growth
+        self.event_history: deque = deque(maxlen=50)
         
         # Load optimization config
         from .analysis_cache import AnalysisCache
@@ -129,7 +131,8 @@ class EventAnalyzer:
     def _llm_analysis(self, event: MonitorEvent) -> Analysis:
         """Perform LLM-based analysis."""
         # Build context from history
-        context_events = self.event_history[-self.context_size:] if self.event_history else []
+        history_list = list(self.event_history)
+        context_events = history_list[-self.context_size:] if history_list else []
         
         # Create prompt
         prompt = self._build_prompt(event, context_events)
