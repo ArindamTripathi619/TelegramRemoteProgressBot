@@ -128,8 +128,8 @@ Provide a concise, informative summary for a status report."""
             summary = self.llm_client.analyze(prompt)
             # Clean up the summary
             summary = summary.strip()
-            if len(summary) > 300:
-                summary = summary[:297] + "..."
+            if len(summary) > 1000:
+                summary = summary[:997] + "..."
             return summary
         except Exception as e:
             return f"Error generating summary: {e}"
