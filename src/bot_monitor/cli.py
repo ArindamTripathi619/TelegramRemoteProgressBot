@@ -217,19 +217,25 @@ class MonitorManager:
                             
                         # Check if we should send milestone update
                         if self.progress_tracker.should_send_update():
-                            milestone_pct = int(self.progress_tracker.current_percentage)
+                            current_pct = self.progress_tracker.current_percentage
+                            milestone_pct = int(current_pct)
                             milestone = (milestone_pct // 10) * 10  # Round to nearest 10%
                             
-                            # Generate and send milestone report
-                            report = self.report_generator.generate_milestone_report(
-                                self.progress_tracker,
-                                milestone
-                            )
+                            if current_pct >= 99.9: # Treat 99.9+ as complete
+                                # Process Complete!
+                                report = self.report_generator.generate_completion_report(self.progress_tracker)
+                                print(f"🎉 Process completed!")
+                            else:
+                                # Generate and send milestone report with analysis
+                                report = self.report_generator.generate_milestone_report(
+                                    self.progress_tracker,
+                                    milestone,
+                                    include_llm_summary=True
+                                )
+                                print(f"📊 Progress update sent: {milestone}%")
                             
                             self.notifier.send_message(report)
-                            
                             self.progress_tracker.mark_update_sent()
-                            print(f"📊 Progress update sent: {milestone}%")
                         
                         # Check for stall
                         if self.progress_tracker.is_stalled():

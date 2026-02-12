@@ -144,12 +144,13 @@ Provide a concise, informative summary for a status report."""
         except Exception as e:
             return f"Error generating summary: {e}"
     
-    def generate_milestone_report(self, tracker: ProgressTracker, milestone: int) -> str:
+    def generate_milestone_report(self, tracker: ProgressTracker, milestone: int, include_llm_summary: bool = True) -> str:
         """Generate a milestone update report.
         
         Args:
             tracker: Progress tracker.
             milestone: Milestone percentage reached.
+            include_llm_summary: Whether to include LLM summary.
             
         Returns:
             Formatted milestone report.
@@ -183,6 +184,17 @@ Provide a concise, informative summary for a status report."""
             if len(latest) > 150:
                 latest = latest[:147] + "..."
             lines.append(f"`{latest}`")
+            
+        # LLM Summary (Optional)
+        if include_llm_summary and self.llm_client and tracker.recent_logs:
+            lines.append("")
+            lines.append("💡 **Analysis:**")
+            try:
+                summary = self._generate_llm_summary(tracker)
+                if summary:
+                    lines.append(summary)
+            except Exception as e:
+                pass
         
         return "\n".join(lines)
     
