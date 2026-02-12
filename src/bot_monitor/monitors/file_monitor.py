@@ -34,6 +34,10 @@ class FileMonitor(BaseMonitor):
             self.pattern = re.compile(pattern, re.IGNORECASE)
         else:
             self.pattern = None
+            
+        # Compile progress patterns (always capture these as INFO)
+        progress_regexes = config.get("progress_regexes", [])
+        self.progress_patterns = [re.compile(p, re.IGNORECASE) for p in progress_regexes]
         
         self.observer: Optional[Observer] = None
         self.file_position = 0
@@ -92,15 +96,26 @@ class FileMonitor(BaseMonitor):
                     if not line:
                         continue
                     
-                    # Check if matches pattern
+                    matched = False
+                    # Check if matches main pattern
                     if self.pattern:
                         if self.pattern.search(line):
                             severity = self._classify_severity(line)
                             self._emit_event(line, severity)
+                            matched = True
                     else:
                         # Emit all lines if no pattern
                         severity = self._classify_severity(line)
                         self._emit_event(line, severity)
+                        matched = True
+                        
+                    # Check progress patterns if not already matched
+                    if not matched:
+                        for p in self.progress_patterns:
+                            if p.search(line):
+                                # Mark as progress event
+                                self._emit_event(line, Severity.INFO, {"is_progress": True})
+                                break
             
             except Exception as e:
                 self._emit_event(

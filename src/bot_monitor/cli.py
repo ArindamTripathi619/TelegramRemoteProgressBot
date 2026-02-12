@@ -100,6 +100,17 @@ class MonitorManager:
             
             try:
                 if mon_type == "file":
+                    # Inject progress patterns if tracking enabled
+                    if self.progress_enabled:
+                        common_patterns = [
+                            r"(\d+(?:\.\d+)?)%",
+                            r"(\d+)\s*/\s*(\d+)",
+                            r"progress:\s*(\d+(?:\.\d+)?)",
+                            r"completed:\s*(\d+(?:\.\d+)?)%",
+                            r"INFO:.*Progress",  # Specific to our format
+                        ]
+                        mon_config["progress_regexes"] = common_patterns
+                        
                     monitor = FileMonitor(name, mon_config)
                 elif mon_type == "pid":
                     monitor = PIDMonitor(name, mon_config)
@@ -157,9 +168,13 @@ class MonitorManager:
                     try:
                         # Feed log line to progress tracker
                         if self.progress_tracker and hasattr(event, 'content'):
+                            print(f"[DEBUG] Event content: {event.content!r}")
                             self.progress_tracker.add_log_line(event.content)
                         
-                        # Analyze event
+                        # Analyze event (skip if it's just a progress update)
+                        if event.metadata.get("is_progress"):
+                            continue
+                            
                         analysis = self.analyzer.analyze_event(event)
                         
                         # Send notification
