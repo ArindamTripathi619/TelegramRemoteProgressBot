@@ -1,3 +1,13 @@
 #!/bin/bash
 export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-python3 -m bot_monitor "$@"
+# Detect venv
+if [ -d "venv" ]; then
+    PYTHON_CMD="./venv/bin/python3"
+elif [ -d ".venv" ]; then
+    PYTHON_CMD="./.venv/bin/python3"
+else
+    PYTHON_CMD="python3"
+fi
+
+export PYTHONPATH=$PYTHONPATH:$(pwd)/src
+$PYTHON_CMD -m bot_monitor "$@"
