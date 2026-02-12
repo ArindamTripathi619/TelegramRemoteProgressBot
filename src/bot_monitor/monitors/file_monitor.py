@@ -60,6 +60,10 @@ class FileMonitor(BaseMonitor):
             recursive=False
         )
         self.observer.start()
+        
+        # Start polling thread as fallback
+        self._polling_thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._polling_thread.start()
     
     def stop(self):
         """Stop monitoring."""
@@ -105,6 +109,18 @@ class FileMonitor(BaseMonitor):
                     {"error": str(e)}
                 )
     
+    def _poll_loop(self):
+        """Poll file for changes as fallback."""
+        while self._running:
+            time.sleep(1.0)
+            try:
+                if self.file_path.exists():
+                    current_size = self.file_path.stat().st_size
+                    if current_size > self.file_position:
+                        self.process_new_lines()
+            except Exception:
+                pass
+
     def _classify_severity(self, line: str) -> Severity:
         """Classify line severity based on content.
         

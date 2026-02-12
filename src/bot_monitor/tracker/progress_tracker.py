@@ -106,10 +106,10 @@ class ProgressTracker:
         
         # Try common patterns
         common_patterns = [
-            (r"(\d+)%", "percentage"),
+            (r"(\d+(?:\.\d+)?)%", "percentage"),
             (r"(\d+)\s*/\s*(\d+)", "fraction"),
-            (r"progress:\s*(\d+)", "percentage"),
-            (r"completed:\s*(\d+)%", "percentage"),
+            (r"progress:\s*(\d+(?:\.\d+)?)", "percentage"),
+            (r"completed:\s*(\d+(?:\.\d+)?)%", "percentage"),
         ]
         
         for line in reversed(self.recent_logs[-20:]):
