@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  bot-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
+    image: bot-monitor:alpine
+    container_name: bot-monitor
+    
+    # Resource limits for lightweight operation
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    
+    restart: unless-stopped
+    
+    # Mount config and logs
+    volumes:
+      - ./config:/app/config:ro
+      - /var/log:/var/log:ro
+      # Uncomment to persist cache/state
+      # - bot-data:/app/data
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Monitor will look for these in environment or config
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      # API Keys (set only the one you use)
+      - LLM_API_KEY=${LLM_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+
+volumes:
+  bot-data:
