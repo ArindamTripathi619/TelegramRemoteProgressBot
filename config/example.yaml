@@ -13,6 +13,16 @@ llm:
   model: "gpt-4o-mini"
   # Optional: for Ollama or custom endpoints
   base_url: null
+  
+  # Token usage optimization (reduce costs/rate limits)
+  optimization:
+    enable_cache: true  # Cache repeated error analysis
+    cache_max_entries: 100  # Max cached analyses
+    cache_ttl_seconds: 3600  # Cache lifetime (1 hour)
+    max_context_lines: 15  # Trim context to N lines
+    include_timestamps: false  # Remove timestamps to save tokens
+    use_local_patterns: true  # Match known patterns locally
+    skip_llm_for_info: true  # Don't use LLM for INFO events
 
 notification:
   # Debounce period in seconds (group similar events)
@@ -51,6 +61,27 @@ progress_tracking:
 interactive:
   listen_for_messages: true  # Poll for user messages
   status_on_any_message: true  # Any message triggers status report
+
+# Severity pattern library (local detection, saves LLM calls)
+severity_patterns:
+  critical:
+    - "segmentation fault|segfault"
+    - "out of memory|oom|memory exhausted"
+    - "panic|kernel panic"
+    - "fatal\\s+error"
+    - "database\\s+(connection\\s+)?failed"
+    - "core dumped"
+  warning:
+    - "deprecated"
+    - "retry|retrying"
+    - "timeout|timed\\s+out"
+    - "connection\\s+(lost|dropped)"
+    - "warn(ing)?:"
+  info:
+    - "start(ed|ing)"
+    - "complet(ed|ion)"
+    - "initializ(ed|ing)"
+    - "success(ful|fully)?"
 
 monitors:
   # Monitor a log file

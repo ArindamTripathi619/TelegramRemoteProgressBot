@@ -79,6 +79,26 @@ class StatusReportGenerator:
         
         return "\n".join(lines)
     
+    def generate_report_with_stats(self, tracker: ProgressTracker, analyzer, include_llm_summary: bool = True) -> str:
+        """Generate status report with token usage stats.
+        
+        Args:
+            tracker: Progress tracker instance.
+            analyzer: EventAnalyzer with token stats.
+            include_llm_summary: Whether to include LLM summary.
+            
+        Returns:
+            Formatted report with stats.
+        """
+        report = self.generate_report(tracker, include_llm_summary)
+        
+        # Add token usage stats
+        if hasattr(analyzer, 'get_stats_summary'):
+            stats_summary = analyzer.get_stats_summary('current')
+            report += f"\n\n{stats_summary}"
+        
+        return report
+    
     def _generate_llm_summary(self, tracker: ProgressTracker) -> Optional[str]:
         """Generate LLM summary of current status.
         

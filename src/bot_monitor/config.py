@@ -164,12 +164,49 @@ class Config:
         return {**defaults, **self.data.get("progress_tracking", {})}
     
     def get_interactive_config(self) -> Dict[str, Any]:
-        """Get interactive features configuration with defaults."""
-        defaults = {
-            "listen_for_messages": True,
-            "status_on_any_message": True
+        """Get interactive features configuration.
+        
+        Returns:
+            Interactive config dict.
+        """
+        return self.data.get('interactive', {
+            'listen_for_messages': False,
+            'status_on_any_message': True
+        })
+    
+    def get_llm_optimization_config(self) -> Dict[str, Any]:
+        """Get LLM optimization configuration.
+        
+        Returns:
+            Optimization config dict with defaults.
+        """
+        llm_config = self.data.get('llm', {})
+        opt_config = llm_config.get('optimization', {})
+        
+        return {
+            'enable_cache': opt_config.get('enable_cache', True),
+            'cache_max_entries': opt_config.get('cache_max_entries', 100),
+            'cache_ttl_seconds': opt_config.get('cache_ttl_seconds', 3600),
+            'max_context_lines': opt_config.get('max_context_lines', 15),
+            'include_timestamps': opt_config.get('include_timestamps', False),
+            'use_local_patterns': opt_config.get('use_local_patterns', True),
+            'skip_llm_for_info': opt_config.get('skip_llm_for_info', True),
+            'severity_patterns': self.get_severity_patterns()
         }
-        return {**defaults, **self.data.get("interactive", {})}
+    
+    def get_severity_patterns(self) -> Dict[str, List[str]]:
+        """Get severity pattern library.
+        
+        Returns:
+            Pattern dictionary or defaults.
+        """
+        patterns = self.data.get('severity_patterns', {})
+        
+        # If empty, return None to use defaults from pattern_matcher
+        if not patterns:
+            return None
+        
+        return patterns
 
 
 def create_example_config(output_path: Path):

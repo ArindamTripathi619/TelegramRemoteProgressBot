@@ -30,7 +30,11 @@ class MonitorManager:
         # Initialize LLM and notifier
         llm_config = config.get_llm_config()
         self.llm_client = create_llm_client(llm_config)
-        self.analyzer = EventAnalyzer(self.llm_client)
+        
+        # Get optimization config and initialize analyzer
+        optimization_config = config.get_llm_optimization_config()
+        self.analyzer = EventAnalyzer(self.llm_client, optimization_config=optimization_config)
+        print(f"✓ LLM optimizations enabled (cache, patterns, context trimming)")
         
         telegram_config = config.get_telegram_config()
         notification_config = config.get_notification_config()

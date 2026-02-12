@@ -19,21 +19,57 @@ class Analysis:
 
 
 class EventAnalyzer:
-    """Analyzes events using LLM."""
+    """Analyzes events using LLM with optimizations."""
     
-    def __init__(self, llm_client: BaseLLMClient, context_size: int = 10):
+    def __init__(self, llm_client: BaseLLMClient, context_size: int = 10, 
+                 optimization_config: Dict[str, Any] = None):
         """Initialize analyzer.
         
         Args:
             llm_client: LLM client.
             context_size: Number of previous events to include for context.
+            optimization_config: Optimization settings dictionary.
         """
         self.llm_client = llm_client
         self.context_size = context_size
         self.event_history: List[MonitorEvent] = []
+        
+        # Load optimization config
+        from .analysis_cache import AnalysisCache
+        from .pattern_matcher import SeverityPatternMatcher, get_default_patterns
+        from .token_tracker import TokenUsageTracker
+        from .context_optimizer import trim_context, estimate_tokens
+        
+        opt_config = optimization_config or {}
+        
+        # Initialize cache if enabled
+        self.cache = None
+        if opt_config.get('enable_cache', True):
+            self.cache = AnalysisCache(
+                max_entries=opt_config.get('cache_max_entries', 100),
+                ttl_seconds=opt_config.get('cache_ttl_seconds', 3600)
+            )
+        
+        # Initialize pattern matcher if enabled
+        self.pattern_matcher = None
+        if opt_config.get('use_local_patterns', True):
+            patterns = opt_config.get('severity_patterns', get_default_patterns())
+            self.pattern_matcher = SeverityPatternMatcher(patterns)
+        
+        # Token usage tracking
+        self.token_tracker = TokenUsageTracker()
+        
+        # Context optimization settings
+        self.max_context_lines = opt_config.get('max_context_lines', 15)
+        self.include_timestamps = opt_config.get('include_timestamps', False)
+        self.skip_llm_for_info = opt_config.get('skip_llm_for_info', True)
+        
+        # Store optimizer functions
+        self.trim_context = trim_context
+        self.estimate_tokens = estimate_tokens
     
     def analyze_event(self, event: MonitorEvent) -> Analysis:
-        """Analyze an event with LLM.
+        """Analyze an event with optimized LLM usage.
         
         Args:
             event: Event to analyze.
@@ -41,6 +77,57 @@ class EventAnalyzer:
         Returns:
             Analysis result.
         """
+        # 1. Check cache first
+        if self.cache:
+            cached = self.cache.get(event)
+            if cached is not None:
+                self.token_tracker.record_cache_hit()
+                return cached
+        
+        # 2. Try pattern matching
+        if self.pattern_matcher:
+            matched_severity = self.pattern_matcher.match(event.content)
+            if matched_severity is not None:
+                self.token_tracker.record_pattern_match()
+                analysis = Analysis(
+                    severity=matched_severity,
+                    summary=f"Pattern-matched: {event.content[:100]}",
+                    root_cause="Known pattern detected",
+                    suggested_action="Check logs for details" if matched_severity != Severity.INFO else "Normal operation",
+                    original_event=event
+                )
+                
+                # Cache pattern-matched result
+                if self.cache:
+                    self.cache.put(event, analysis)
+                
+                return analysis
+        
+        # 3. Skip LLM for INFO if configured
+        if self.skip_llm_for_info and event.severity == Severity.INFO:
+            self.token_tracker.record_pattern_match() # Record as pattern match for simplicity
+            analysis = Analysis(
+                severity=Severity.INFO,
+                summary=event.content[:100],
+                root_cause="INFO level event",
+                suggested_action="No action required",
+                original_event=event
+            )
+            if self.cache:
+                self.cache.put(event, analysis)
+            return analysis
+        
+        # 4. Use LLM analysis with optimized context
+        analysis = self._llm_analysis(event)
+        
+        # Cache LLM result
+        if self.cache:
+            self.cache.put(event, analysis)
+            
+        return analysis
+    
+    def _llm_analysis(self, event: MonitorEvent) -> Analysis:
+        """Perform LLM-based analysis."""
         # Build context from history
         context_events = self.event_history[-self.context_size:] if self.event_history else []
         
@@ -50,6 +137,11 @@ class EventAnalyzer:
         try:
             # Get LLM analysis
             response = self.llm_client.analyze(prompt)
+            
+            # Track token usage
+            tokens_sent = self.estimate_tokens(prompt)
+            tokens_received = self.estimate_tokens(response)
+            self.token_tracker.record_llm_call(tokens_sent, tokens_received)
             
             # Parse response
             analysis = self._parse_response(response, event)
@@ -93,15 +185,22 @@ class EventAnalyzer:
                 )
     
     def _build_prompt(self, event: MonitorEvent, context: List[MonitorEvent]) -> str:
-        """Build analysis prompt.
+        """Build optimized analysis prompt.
         
         Args:
             event: Current event.
             context: Previous events for context.
             
         Returns:
-            Formatted prompt.
+            Formatted prompt with trimmed context.
         """
+        # Optimize event content
+        optimized_content = self.trim_context(
+            event.content,
+            max_lines=self.max_context_lines,
+            include_timestamps=self.include_timestamps
+        )
+        
         prompt = """You are analyzing logs from a monitoring system. Based on the information below, provide a structured analysis.
 
 **Your task:**
@@ -114,17 +213,17 @@ class EventAnalyzer:
 """
         
         if context:
-            for ctx_event in context:
-                prompt += f"[{ctx_event.timestamp.strftime('%H:%M:%S')}] {ctx_event.source}: {ctx_event.content[:200]}\n"
+            for ctx_event in context[-3:]:  # Only last 3 for brevity
+                ctx_content = self.trim_context(ctx_event.content, max_lines=3, include_timestamps=False)
+                prompt += f"[{ctx_event.source}]: {ctx_content[:150]}\n"
         else:
             prompt += "(No previous context)\n"
         
         prompt += f"""
 **Current Event:**
 Source: {event.source}
-Time: {event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}
 Content:
-{event.content}
+{optimized_content}
 
 **Required Response Format (JSON):**
 {{
@@ -189,3 +288,32 @@ Respond ONLY with valid JSON.
                 suggested_action="Review original event",
                 original_event=event
             )
+    
+    def get_token_stats(self, period: str = "current") -> Dict[str, Any]:
+        """Get token usage statistics.
+        
+        Args:
+            period: 'current', 'hourly', or 'daily'.
+            
+        Returns:
+            Statistics dictionary.
+        """
+        stats = self.token_tracker.get_stats(period)
+        
+        # Add cache stats if available
+        if self.cache:
+            cache_stats = self.cache.get_stats()
+            stats['cache_stats'] = cache_stats
+        
+        return stats
+    
+    def get_stats_summary(self, period: str = "current") -> str:
+        """Get formatted statistics summary.
+        
+        Args:
+            period: 'current', 'hourly', or 'daily'.
+            
+        Returns:
+            Formatted summary string.
+        """
+        return self.token_tracker.get_summary(period)
