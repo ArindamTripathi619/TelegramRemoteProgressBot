@@ -54,18 +54,19 @@ class TelegramNotifier:
         message = self._format_message(analysis)
         
         # Send
+        import asyncio
         try:
-            self.bot.send_message(
+            asyncio.run(self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
                 parse_mode="Markdown",
-            )
+            ))
             
             # Record send time
             self.message_times.append(datetime.now())
             return True
         
-        except TelegramError as e:
+        except Exception as e:
             print(f"Failed to send Telegram message: {e}")
             return False
     
@@ -75,14 +76,15 @@ class TelegramNotifier:
         Returns:
             True if sent successfully.
         """
+        import asyncio
         try:
-            self.bot.send_message(
+            asyncio.run(self.bot.send_message(
                 chat_id=self.chat_id,
-                text="🤖 *Bot Monitor Test*\n\nYour monitoring system is configured correctly!",
+                text="🤖 *Bot Monitor Test*\\n\\nYour monitoring system is configured correctly!",
                 parse_mode="Markdown",
-            )
+            ))
             return True
-        except TelegramError as e:
+        except Exception as e:
             print(f"Test message failed: {e}")
             return False
     

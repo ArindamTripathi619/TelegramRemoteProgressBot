@@ -103,7 +103,7 @@ class SetupWizard:
                 key = Prompt.ask(f"🔑 {provider.capitalize()} API Key", password=True)
                 config["api_key"] = key
                 
-                # Validation (Optional, can skip if user wants)
+                # Validation
                 if Confirm.ask("Validate API Key?", default=True):
                     with console.status("[bold green]Testing API key...[/bold green]"):
                         try:
@@ -112,10 +112,12 @@ class SetupWizard:
                             client = create_llm_client(test_config)
                             client.analyze("Test")
                             console.print("✅ [green]API Key valid.[/green]")
-                            break
+                            break # Success, exit loop
                         except Exception as e:
                             console.print(f"❌ [red]Validation failed: {e}[/red]")
-                            if not Confirm.ask("Retry?", default=True):
+                            if not Confirm.ask("Retry entering key?", default=True):
+                                # User chose not to retry, break regardless of validity
+                                console.print("[yellow]Proceeding with unvalidated key.[/yellow]")
                                 break
                 else:
                     break
