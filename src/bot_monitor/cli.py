@@ -57,6 +57,7 @@ class MonitorManager:
         self.progress_tracker = None
         self.report_generator = None
         self.message_listener = None
+        self.ui_callback = None  # Callback for UI/State updates
         
         if self.progress_enabled:
             # Merge configs for tracker
@@ -79,6 +80,10 @@ class MonitorManager:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
     
+    def set_ui_callback(self, callback):
+        """Set callback for UI updates (progress, status)."""
+        self.ui_callback = callback
+
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
         print("\nShutting down gracefully...")
@@ -177,6 +182,10 @@ class MonitorManager:
                     estimated = self.progress_tracker.estimate_progress()
                     
                     if estimated is not None:
+                        # Update UI/State
+                        if self.ui_callback:
+                            self.ui_callback(estimated, "Monitoring active")
+                            
                         # Check if we should send milestone update
                         if self.progress_tracker.should_send_update():
                             milestone_pct = int(self.progress_tracker.current_percentage)
