@@ -41,13 +41,17 @@ class TelegramListener:
         Returns:
             True if a message was received.
         """
+        import asyncio
         try:
+            async def _get_updates():
+                return await self.bot.get_updates(
+                    offset=self.last_update_id + 1 if self.last_update_id else None,
+                    timeout=2,
+                    allowed_updates=["message"]
+                )
+
             # Get updates
-            updates = self.bot.get_updates(
-                offset=self.last_update_id + 1 if self.last_update_id else None,
-                timeout=2,
-                allowed_updates=["message"]
-            )
+            updates = asyncio.run(_get_updates())
             
             message_received = False
             
@@ -55,7 +59,7 @@ class TelegramListener:
                 self.last_update_id = update.update_id
                 
                 # Check if it's a message from our chat
-                if update.message and str(update.message.chat.id) == self.chat_id:
+                if update.message and str(update.message.chat.id) == str(self.chat_id):
                     message_text = update.message.text or ""
                     
                     logger.info(f"Received message: {message_text[:50]}...")
