@@ -32,8 +32,19 @@ class MonitorManager:
         self.llm_client = create_llm_client(llm_config)
         
         # Get optimization config and initialize analyzer
+        # Get optimization config
         optimization_config = config.get_llm_optimization_config()
-        self.analyzer = EventAnalyzer(self.llm_client, optimization_config=optimization_config)
+        
+        # Initialize Shared Token Tracker
+        from .analyzers.token_tracker import TokenUsageTracker
+        self.token_tracker = TokenUsageTracker()
+        
+        # Initialize analyzer with shared tracker
+        self.analyzer = EventAnalyzer(
+            self.llm_client, 
+            optimization_config=optimization_config,
+            token_tracker=self.token_tracker
+        )
         print(f"✓ LLM optimizations enabled (cache, patterns, context trimming)")
         
         telegram_config = config.get_telegram_config()
@@ -63,7 +74,11 @@ class MonitorManager:
             # Merge configs for tracker
             tracker_config = {**process_config, **progress_config}
             self.progress_tracker = ProgressTracker(tracker_config)
-            self.report_generator = StatusReportGenerator(self.llm_client)
+            # Initialize generator with shared token tracker
+            self.report_generator = StatusReportGenerator(
+                self.llm_client,
+                token_tracker=self.token_tracker
+            )
             print(f"✓ Progress tracking enabled for: {process_config['name']}")
         
         # Initialize message listener if interactive features enabled

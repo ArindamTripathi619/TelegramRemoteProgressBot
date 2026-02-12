@@ -23,13 +23,15 @@ class EventAnalyzer:
     """Analyzes events using LLM with optimizations."""
     
     def __init__(self, llm_client: BaseLLMClient, context_size: int = 10, 
-                 optimization_config: Dict[str, Any] = None):
+                 optimization_config: Dict[str, Any] = None,
+                 token_tracker = None):
         """Initialize analyzer.
         
         Args:
             llm_client: LLM client.
             context_size: Number of previous events to include for context.
             optimization_config: Optimization settings dictionary.
+            token_tracker: Shared token usage tracker.
         """
         self.llm_client = llm_client
         self.context_size = context_size
@@ -55,11 +57,11 @@ class EventAnalyzer:
         # Initialize pattern matcher if enabled
         self.pattern_matcher = None
         if opt_config.get('use_local_patterns', True):
-            patterns = opt_config.get('severity_patterns', get_default_patterns())
+            patterns = opt_config.get('severity_patterns') or get_default_patterns()
             self.pattern_matcher = SeverityPatternMatcher(patterns)
         
         # Token usage tracking
-        self.token_tracker = TokenUsageTracker()
+        self.token_tracker = token_tracker or TokenUsageTracker()
         
         # Context optimization settings
         self.max_context_lines = opt_config.get('max_context_lines', 15)

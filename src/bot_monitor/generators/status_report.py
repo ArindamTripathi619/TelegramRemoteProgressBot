@@ -5,18 +5,21 @@ from datetime import datetime
 
 from ..tracker import ProgressTracker
 from ..analyzers import BaseLLMClient
+from ..analyzers.context_optimizer import estimate_tokens
 
 
 class StatusReportGenerator:
     """Generates formatted status reports for Telegram."""
     
-    def __init__(self, llm_client: Optional[BaseLLMClient] = None):
+    def __init__(self, llm_client: Optional[BaseLLMClient] = None, token_tracker=None):
         """Initialize generator.
         
         Args:
             llm_client: Optional LLM client for generating summaries.
+            token_tracker: Optional shared token tracker.
         """
         self.llm_client = llm_client
+        self.token_tracker = token_tracker
     
     def generate_report(self, tracker: ProgressTracker, include_llm_summary: bool = True) -> str:
         """Generate a status report.
@@ -126,6 +129,13 @@ Provide a concise, informative summary for a status report."""
         
         try:
             summary = self.llm_client.analyze(prompt)
+            
+            # Track tokens if tracker available
+            if self.token_tracker:
+                tokens_sent = estimate_tokens(prompt)
+                tokens_received = estimate_tokens(summary)
+                self.token_tracker.record_llm_call(tokens_sent, tokens_received)
+            
             # Clean up the summary
             summary = summary.strip()
             if len(summary) > 1000:
