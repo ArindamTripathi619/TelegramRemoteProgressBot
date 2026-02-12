@@ -197,11 +197,7 @@ class MonitorManager:
                                 milestone
                             )
                             
-                            self.notifier.bot.send_message(
-                                chat_id=self.notifier.chat_id,
-                                text=report,
-                                parse_mode='Markdown'
-                            )
+                            self.notifier.send_message(report)
                             
                             self.progress_tracker.mark_update_sent()
                             print(f"📊 Progress update sent: {milestone}%")
@@ -209,11 +205,7 @@ class MonitorManager:
                         # Check for stall
                         if self.progress_tracker.is_stalled():
                             stall_msg = f"⚠️ **Warning:** {self.progress_tracker.process_name} appears stalled at {self.progress_tracker.current_percentage:.1f}%"
-                            self.notifier.bot.send_message(
-                                chat_id=self.notifier.chat_id,
-                                text=stall_msg,
-                                parse_mode='Markdown'
-                            )
+                            self.notifier.send_message(stall_msg)
                             print("⚠️  Stall alert sent")
                 
                 except Exception as e:
@@ -245,17 +237,12 @@ class MonitorManager:
                     include_llm_summary=True
                 )
                 
-                self.notifier.bot.send_message(
-                    chat_id=self.notifier.chat_id,
-                    text=report,
-                    parse_mode='Markdown'
-                )
+                self.notifier.send_message(report)
                 print("✓ Status report sent")
             else:
                 # Send simple status
-                self.notifier.bot.send_message(
-                    chat_id=self.notifier.chat_id,
-                    text="✓ Bot-monitor is running and monitoring your processes."
+                self.notifier.send_message(
+                    "✓ Bot-monitor is running and monitoring your processes."
                 )
         except Exception as e:
             print(f"Error sending status report: {e}")

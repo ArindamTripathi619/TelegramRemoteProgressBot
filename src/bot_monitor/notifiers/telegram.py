@@ -29,7 +29,7 @@ class TelegramNotifier:
             chat_id: Chat ID to send messages to.
             rate_limit_per_hour: Maximum messages per hour.
         """
-        self.bot = Bot(token=bot_token)
+        self.bot_token = bot_token
         self.chat_id = chat_id
         self.rate_limit = rate_limit_per_hour
         
@@ -56,11 +56,15 @@ class TelegramNotifier:
         # Send
         import asyncio
         try:
-            asyncio.run(self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode="Markdown",
-            ))
+            async def _send():
+                async with Bot(self.bot_token) as bot:
+                    await bot.send_message(
+                        chat_id=self.chat_id,
+                        text=message,
+                        parse_mode="Markdown",
+                    )
+            
+            asyncio.run(_send())
             
             # Record send time
             self.message_times.append(datetime.now())
@@ -78,16 +82,45 @@ class TelegramNotifier:
         """
         import asyncio
         try:
-            asyncio.run(self.bot.send_message(
-                chat_id=self.chat_id,
-                text="🤖 *Bot Monitor Test*\\n\\nYour monitoring system is configured correctly!",
-                parse_mode="Markdown",
-            ))
+            async def _send_test():
+                async with Bot(self.bot_token) as bot:
+                    await bot.send_message(
+                        chat_id=self.chat_id,
+                        text="🤖 *Bot Monitor Test*\n\nYour monitoring system is configured correctly!",
+                        parse_mode="Markdown",
+                    )
+
+            asyncio.run(_send_test())
             return True
         except Exception as e:
             print(f"Test message failed: {e}")
             return False
     
+    def send_message(self, text: str) -> bool:
+        """Send a generic text message.
+        
+        Args:
+            text: Message text.
+            
+        Returns:
+            True if sent successfully.
+        """
+        import asyncio
+        try:
+            async def _send():
+                async with Bot(self.bot_token) as bot:
+                    await bot.send_message(
+                        chat_id=self.chat_id,
+                        text=text,
+                        parse_mode="Markdown",
+                    )
+
+            asyncio.run(_send())
+            return True
+        except Exception as e:
+            print(f"Failed to send message: {e}")
+            return False
+
     def _check_rate_limit(self) -> bool:
         """Check if we can send another message.
         
