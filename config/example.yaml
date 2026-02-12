@@ -22,6 +22,36 @@ notification:
   # Which severity levels to send
   severity_levels: [critical, warning, info]
 
+# Process information for progress tracking
+process:
+  name: "My Process"
+  description: "Training ML model on large dataset"
+  keywords:
+    - "progress"
+    - "processed"
+    - "epoch"
+    - "batch"
+    - "complete"
+  expected_duration_minutes: 60  # Optional: helps with time-based estimation
+  completion_indicators:  # Optional: regex patterns for parsing progress
+    - pattern: "Processed (\\d+)/(\\d+)"
+      type: "fraction"
+    - pattern: "Progress: (\\d+)%"
+      type: "percentage"
+
+# Progress tracking settings
+progress_tracking:
+  enabled: true
+  update_interval_percent: 10  # Send updates every 10%
+  min_update_interval_seconds: 300  # Min 5 min between updates
+  stall_threshold_minutes: 30  # Alert if no progress for 30 min
+  estimation_mode: "auto"  # auto, log-based, time-based, llm-assisted
+
+# Interactive features (two-way communication)
+interactive:
+  listen_for_messages: true  # Poll for user messages
+  status_on_any_message: true  # Any message triggers status report
+
 monitors:
   # Monitor a log file
   - type: file

@@ -53,6 +53,9 @@ logs/
 .coverage
 htmlcov/
 
+# Agent artifacts
+.agent/
+
 # Temporary files
 .tmp/
 *.tmp

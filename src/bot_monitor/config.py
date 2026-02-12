@@ -140,6 +140,36 @@ class Config:
     def get_monitors(self) -> List[Dict[str, Any]]:
         """Get list of monitor configurations."""
         return self.data["monitors"]
+    
+    def get_process_config(self) -> Dict[str, Any]:
+        """Get process tracking configuration with defaults."""
+        defaults = {
+            "name": "Process",
+            "description": "",
+            "keywords": [],
+            "expected_duration_minutes": None,
+            "completion_indicators": []
+        }
+        return {**defaults, **self.data.get("process", {})}
+    
+    def get_progress_tracking_config(self) -> Dict[str, Any]:
+        """Get progress tracking settings with defaults."""
+        defaults = {
+            "enabled": True,
+            "update_interval_percent": 10,
+            "min_update_interval_seconds": 300,
+            "stall_threshold_minutes": 30,
+            "estimation_mode": "auto"
+        }
+        return {**defaults, **self.data.get("progress_tracking", {})}
+    
+    def get_interactive_config(self) -> Dict[str, Any]:
+        """Get interactive features configuration with defaults."""
+        defaults = {
+            "listen_for_messages": True,
+            "status_on_any_message": True
+        }
+        return {**defaults, **self.data.get("interactive", {})}
 
 
 def create_example_config(output_path: Path):

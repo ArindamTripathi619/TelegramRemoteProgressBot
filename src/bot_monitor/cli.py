@@ -40,6 +40,37 @@ class MonitorManager:
             rate_limit_per_hour=notification_config["rate_limit_per_hour"]
         )
         
+        # Initialize progress tracking if enabled
+        from .tracker import ProgressTracker
+        from .generators import StatusReportGenerator
+        from .notifiers.telegram_listener import TelegramListener
+        
+        progress_config = config.get_progress_tracking_config()
+        process_config = config.get_process_config()
+        interactive_config = config.get_interactive_config()
+        
+        self.progress_enabled = progress_config["enabled"]
+        self.progress_tracker = None
+        self.report_generator = None
+        self.message_listener = None
+        
+        if self.progress_enabled:
+            # Merge configs for tracker
+            tracker_config = {**process_config, **progress_config}
+            self.progress_tracker = ProgressTracker(tracker_config)
+            self.report_generator = StatusReportGenerator(self.llm_client)
+            print(f"✓ Progress tracking enabled for: {process_config['name']}")
+        
+        # Initialize message listener if interactive features enabled
+        if interactive_config["listen_for_messages"]:
+            self.message_listener = TelegramListener(
+                bot_token=telegram_config["bot_token"],
+                chat_id=telegram_config["chat_id"]
+            )
+            # Set callback for status reports
+            self.message_listener.set_message_callback(self._handle_user_message)
+            print("✓ Telegram message listening enabled")
+        
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -99,7 +130,13 @@ class MonitorManager:
     
     def _event_loop(self):
         """Main event processing loop."""
+        import time
+        last_progress_check = time.time()
+        progress_check_interval = 10  # Check progress every 10 seconds
+        
         while self.running:
+            current_time = time.time()
+            
             # Collect events from all monitors
             for monitor in self.monitors:
                 if not monitor.is_running():
@@ -109,6 +146,10 @@ class MonitorManager:
                 
                 for event in events:
                     try:
+                        # Feed log line to progress tracker
+                        if self.progress_tracker and hasattr(event, 'content'):
+                            self.progress_tracker.add_log_line(event.content)
+                        
                         # Analyze event
                         analysis = self.analyzer.analyze_event(event)
                         
@@ -123,8 +164,88 @@ class MonitorManager:
                     except Exception as e:
                         print(f"Error processing event: {e}")
             
+            # Progress tracking logic
+            if self.progress_tracker and (current_time - last_progress_check) >= progress_check_interval:
+                last_progress_check = current_time
+                
+                try:
+                    # Estimate progress
+                    estimated = self.progress_tracker.estimate_progress()
+                    
+                    if estimated is not None:
+                        # Check if we should send milestone update
+                        if self.progress_tracker.should_send_update():
+                            milestone_pct = int(self.progress_tracker.current_percentage)
+                            milestone = (milestone_pct // 10) * 10  # Round to nearest 10%
+                            
+                            # Generate and send milestone report
+                            report = self.report_generator.generate_milestone_report(
+                                self.progress_tracker,
+                                milestone
+                            )
+                            
+                            self.notifier.bot.send_message(
+                                chat_id=self.notifier.chat_id,
+                                text=report,
+                                parse_mode='Markdown'
+                            )
+                            
+                            self.progress_tracker.mark_update_sent()
+                            print(f"📊 Progress update sent: {milestone}%")
+                        
+                        # Check for stall
+                        if self.progress_tracker.is_stalled():
+                            stall_msg = f"⚠️ **Warning:** {self.progress_tracker.process_name} appears stalled at {self.progress_tracker.current_percentage:.1f}%"
+                            self.notifier.bot.send_message(
+                                chat_id=self.notifier.chat_id,
+                                text=stall_msg,
+                                parse_mode='Markdown'
+                            )
+                            print("⚠️  Stall alert sent")
+                
+                except Exception as e:
+                    print(f"Progress tracking error: {e}")
+            
+            # Poll for user messages
+            if self.message_listener:
+                try:
+                    self.message_listener.poll_once()
+                except Exception as e:
+                    print(f"Message polling error: {e}")
+            
             # Sleep briefly
             time.sleep(1)
+    
+    def _handle_user_message(self, message_text: str):
+        """Handle incoming user message by sending status report.
+        
+        Args:
+            message_text: The message text (ignored, any message triggers report).
+        """
+        print(f"📩 User message received, generating status report...")
+        
+        try:
+            if self.progress_tracker and self.report_generator:
+                # Generate full status report
+                report = self.report_generator.generate_report(
+                    self.progress_tracker,
+                    include_llm_summary=True
+                )
+                
+                self.notifier.bot.send_message(
+                    chat_id=self.notifier.chat_id,
+                    text=report,
+                    parse_mode='Markdown'
+                )
+                print("✓ Status report sent")
+            else:
+                # Send simple status
+                self.notifier.bot.send_message(
+                    chat_id=self.notifier.chat_id,
+                    text="✓ Bot-monitor is running and monitoring your processes."
+                )
+        except Exception as e:
+            print(f"Error sending status report: {e}")
     
     def stop(self):
         """Stop all monitors."""
@@ -268,9 +389,60 @@ def cmd_setup(args):
         config_data["llm"]["base_url"] = "http://localhost:11434"
         print(f"  Model: {config_data['llm']['model']}")
     
-    # Step 3: Monitor Configuration
+    # Step 3: Process Information (NEW)
     print()
-    print("[3/5] Monitor Configuration")
+    print("[3/6] Process Information")
+    print("-" * 40)
+    print("Help bot-monitor understand what you're monitoring:")
+    print()
+    
+    process_name = input("Process name (e.g., 'Data Migration', 'Model Training') [My Process]: ").strip()
+    if not process_name:
+        process_name = "My Process"
+    
+    print("\nProvide a brief description of what this process does:")
+    description = input("Description: ").strip()
+    
+    print("\nKeywords to watch for in logs (comma-separated):")
+    print("  Examples: 'progress, processed, complete, error, batch'")
+    keywords_input = input("Keywords: ").strip()
+    keywords = [k.strip() for k in keywords_input.split(",")] if keywords_input else []
+    
+    expected_min = input("\nExpected duration in minutes (optional, for better estimates) [skip]: ").strip()
+    expected_duration = None
+    if expected_min:
+        try:
+            expected_duration = int(expected_min)
+        except ValueError:
+            print("⚠️ Invalid number, skipping duration estimate")
+    
+    config_data["process"] = {
+        "name": process_name,
+        "description": description,
+        "keywords": keywords,
+        "expected_duration_minutes": expected_duration
+    }
+    
+    # Enable progress tracking by default
+    config_data["progress_tracking"] = {
+        "enabled": True,
+        "update_interval_percent": 10,
+        "min_update_interval_seconds": 300
+    }
+    
+    # Enable interactive features
+    config_data["interactive"] = {
+        "listen_for_messages": True,
+        "status_on_any_message": True
+    }
+    
+    print(f"\n✓ Process configured: {process_name}")
+    if keywords:
+        print(f"✓ Watching for keywords: {', '.join(keywords[:3])}{'...' if len(keywords) > 3 else ''}")
+    
+    # Step 4: Monitor Configuration
+    print()
+    print("[4/6] Monitor Configuration")
     print("-" * 40)
     print("What would you like to monitor?")
     print()
@@ -392,9 +564,9 @@ def cmd_setup(args):
     if not config_data["monitors"]:
         print("\n⚠️  No monitors configured! You can add them later in the config file.")
     
-    # Step 4: Notification Settings
+    # Step 5: Notification Settings
     print()
-    print("[4/5] Notification Settings")
+    print("[5/6] Notification Settings")
     print("-" * 40)
     
     rate_input = input(f"Max notifications per hour [10]: ").strip()
@@ -406,9 +578,9 @@ def cmd_setup(args):
     
     print(f"✓ Rate limit: {config_data['notification']['rate_limit_per_hour']}/hour")
     
-    # Step 5: Save Configuration
+    # Step 6: Save Configuration
     print()
-    print("[5/5] Save Configuration")
+    print("[6/6] Save Configuration")
     print("-" * 40)
     
     # Display summary
