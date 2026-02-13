@@ -1,6 +1,7 @@
 """Telegram notification system."""
 
 import time
+import html
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
@@ -61,7 +62,8 @@ class TelegramNotifier:
                     await bot.send_message(
                         chat_id=self.chat_id,
                         text=message,
-                        parse_mode="Markdown",
+                        parse_mode="HTML",
+                        read_timeout=30,
                     )
             
             asyncio.run(_send())
@@ -86,8 +88,8 @@ class TelegramNotifier:
                 async with Bot(self.bot_token) as bot:
                     await bot.send_message(
                         chat_id=self.chat_id,
-                        text="🤖 *Bot Monitor Test*\n\nYour monitoring system is configured correctly!",
-                        parse_mode="Markdown",
+                        text="🤖 <b>Bot Monitor Test</b>\n\nYour monitoring system is configured correctly!",
+                        parse_mode="HTML",
                     )
 
             asyncio.run(_send_test())
@@ -112,7 +114,7 @@ class TelegramNotifier:
                     await bot.send_message(
                         chat_id=self.chat_id,
                         text=text,
-                        parse_mode="Markdown",
+                        parse_mode="HTML",
                     )
 
             asyncio.run(_send())
@@ -144,7 +146,7 @@ class TelegramNotifier:
             analysis: Analysis to format.
             
         Returns:
-            Formatted message.
+            Formatted message (HTML mode).
         """
         emoji = self.SEVERITY_EMOJI.get(analysis.severity, "⚪")
         severity_text = analysis.severity.value.upper()
@@ -152,17 +154,19 @@ class TelegramNotifier:
         event = analysis.original_event
         
         # Build message
+        summary = html.escape(analysis.summary)
         lines = [
-            f"{emoji} *{severity_text}: {analysis.summary}*",
+            f"{emoji} <b>{severity_text}: {summary}</b>",
             "",
-            f"*Source:* {event.source}",
-            f"*Time:* {event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"<b>Source:</b> {html.escape(event.source)}",
+            f"<b>Time:</b> {event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
             "",
         ]
         
         # Add analysis
         if analysis.root_cause and analysis.root_cause != "Unknown":
-            lines.append(f"*Root Cause:*\n{analysis.root_cause}")
+            root_cause = html.escape(analysis.root_cause)
+            lines.append(f"<b>Root Cause:</b>\n{root_cause}")
             lines.append("")
         
         # Add original content (truncated)
@@ -170,11 +174,13 @@ class TelegramNotifier:
         if len(event.content) > 300:
             content += "..."
         
-        lines.append(f"*Event:*\n```\n{content}\n```")
+        escaped_content = html.escape(content)
+        lines.append(f"<b>Event:</b>\n<pre>{escaped_content}</pre>")
         lines.append("")
         
         # Add suggested action
         if analysis.suggested_action:
-            lines.append(f"*Action:* {analysis.suggested_action}")
+            action = html.escape(analysis.suggested_action)
+            lines.append(f"<b>Action:</b> {action}")
         
         return "\n".join(lines)

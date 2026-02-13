@@ -3,8 +3,9 @@
 import time
 import logging
 from typing import Optional, Callable
+import asyncio
 from telegram import Bot, Update
-from telegram.error import TelegramError
+from telegram.error import TelegramError, TimedOut, NetworkError
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ class TelegramListener:
             bot_token: Telegram bot token.
             chat_id: Chat ID to listen to.
         """
-        self.bot = Bot(token=bot_token)
+        self.token = bot_token
         self.chat_id = chat_id
         self.last_update_id: Optional[int] = None
         self.running = False
@@ -41,14 +42,14 @@ class TelegramListener:
         Returns:
             True if a message was received.
         """
-        import asyncio
         try:
             async def _get_updates():
-                return await self.bot.get_updates(
-                    offset=self.last_update_id + 1 if self.last_update_id else None,
-                    timeout=2,
-                    allowed_updates=["message"]
-                )
+                async with Bot(token=self.token) as bot:
+                    return await bot.get_updates(
+                        offset=self.last_update_id + 1 if self.last_update_id else None,
+                        timeout=20,  # Longer timeout for long polling
+                        allowed_updates=["message"]
+                    )
 
             # Get updates
             updates = asyncio.run(_get_updates())
@@ -72,8 +73,14 @@ class TelegramListener:
             
             return message_received
         
+        except (asyncio.TimeoutError, TimedOut):
+            # Normal timeout for long polling, just return False
+            return False
+        except NetworkError as e:
+            logger.warning(f"Telegram network error: {e}")
+            return False
         except TelegramError as e:
-            logger.error(f"Telegram polling error: {e}")
+            logger.error(f"Telegram API error: {e}")
             return False
         except Exception as e:
             logger.error(f"Unexpected error in polling: {e}")

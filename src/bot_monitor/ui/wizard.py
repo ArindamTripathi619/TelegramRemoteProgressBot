@@ -181,7 +181,8 @@ class SetupWizard:
         console.print("\n[bold]5. Finalize[/bold]", style="cyan")
         
         config_dir = Path.home() / ".config" / "bot-monitor"
-        config_dir.mkdir(parents=True, exist_ok=True)
+        # Create directory with 0o700 (rwx------)
+        config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         config_path = config_dir / "config.yaml"
         
         if config_path.exists():
@@ -189,7 +190,9 @@ class SetupWizard:
                 console.print("[yellow]Setup cancelled via overwrite denial.[/yellow]")
                 return
 
-        with open(config_path, 'w') as f:
+        # Save with restricted permissions (0o600: rw-------)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        with os.fdopen(os.open(config_path, flags, 0o600), 'w') as f:
             yaml.dump(self.config_data, f, sort_keys=False)
             
         console.print(Panel.fit(

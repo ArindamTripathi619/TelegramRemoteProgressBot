@@ -259,6 +259,7 @@ monitors:
     since: "5 minutes ago"
 """
     
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
+    output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    with os.fdopen(os.open(output_path, flags, 0o600), 'w') as f:
         f.write(example)

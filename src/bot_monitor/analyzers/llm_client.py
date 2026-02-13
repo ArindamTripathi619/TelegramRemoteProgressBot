@@ -15,27 +15,28 @@ class BaseLLMClient(ABC):
     
     @abstractmethod
     def analyze(self, prompt: str) -> str:
-        """Analyze with LLM.
-        
-        Args:
-            prompt: Analysis prompt.
-            
-        Returns:
-            LLM response.
-        """
+        """Analyze with LLM."""
         pass
+
+    def _handle_error(self, provider: str, e: Exception):
+        """Standardized error handling for all providers."""
+        error_msg = str(e).lower()
+        
+        # Detect quota/billing issues
+        if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits", "429"]):
+            raise LLMError(f"QUOTA_EXHAUSTED: {provider} quota exceeded or rate limited. {e}")
+            
+        # Detect authentication issues
+        if any(word in error_msg for word in ["invalid", "authentication", "api key", "unauthorized", "401"]):
+            raise LLMError(f"AUTH_ERROR: {provider} authentication failed. Check your API key. {e}")
+            
+        raise LLMError(f"{provider} API error: {e}")
 
 
 class OpenAIClient(BaseLLMClient):
     """OpenAI client."""
     
     def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
-        """Initialize client.
-        
-        Args:
-            api_key: OpenAI API key.
-            model: Model name.
-        """
         try:
             from openai import OpenAI
         except ImportError:
@@ -45,7 +46,6 @@ class OpenAIClient(BaseLLMClient):
         self.model = model
     
     def analyze(self, prompt: str) -> str:
-        """Analyze with OpenAI."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -58,27 +58,13 @@ class OpenAIClient(BaseLLMClient):
             )
             return response.choices[0].message.content or ""
         except Exception as e:
-            error_msg = str(e).lower()
-            # Detect quota/billing issues
-            if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits"]):
-                raise LLMError(f"QUOTA_EXHAUSTED: {e}")
-            # Detect authentication issues
-            elif any(word in error_msg for word in ["invalid", "authentication", "api key", "unauthorized"]):
-                raise LLMError(f"AUTH_ERROR: {e}")
-            else:
-                raise LLMError(f"OpenAI API error: {e}")
+            self._handle_error("OpenAI", e)
 
 
 class AnthropicClient(BaseLLMClient):
     """Anthropic client."""
     
     def __init__(self, api_key: str, model: str = "claude-3-5-haiku-20241022"):
-        """Initialize client.
-        
-        Args:
-            api_key: Anthropic API key.
-            model: Model name.
-        """
         try:
             from anthropic import Anthropic
         except ImportError:
@@ -88,7 +74,6 @@ class AnthropicClient(BaseLLMClient):
         self.model = model
     
     def analyze(self, prompt: str) -> str:
-        """Analyze with Anthropic."""
         try:
             response = self.client.messages.create(
                 model=self.model,
@@ -100,25 +85,13 @@ class AnthropicClient(BaseLLMClient):
             )
             return response.content[0].text
         except Exception as e:
-            error_msg = str(e).lower()
-            if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits"]):
-                raise LLMError(f"QUOTA_EXHAUSTED: {e}")
-            elif any(word in error_msg for word in ["invalid", "authentication", "api key", "unauthorized"]):
-                raise LLMError(f"AUTH_ERROR: {e}")
-            else:
-                raise LLMError(f"Anthropic API error: {e}")
+            self._handle_error("Anthropic", e)
 
 
 class GroqClient(BaseLLMClient):
     """Groq client."""
     
     def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile"):
-        """Initialize client.
-        
-        Args:
-            api_key: Groq API key.
-            model: Model name.
-        """
         try:
             from groq import Groq
         except ImportError:
@@ -128,7 +101,6 @@ class GroqClient(BaseLLMClient):
         self.model = model
     
     def analyze(self, prompt: str) -> str:
-        """Analyze with Groq."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -141,32 +113,19 @@ class GroqClient(BaseLLMClient):
             )
             return response.choices[0].message.content or ""
         except Exception as e:
-            error_msg = str(e).lower()
-            if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits"]):
-                raise LLMError(f"QUOTA_EXHAUSTED: {e}")
-            elif any(word in error_msg for word in ["invalid", "authentication", "api key", "unauthorized"]):
-                raise LLMError(f"AUTH_ERROR: {e}")
-            else:
-                raise LLMError(f"Groq API error: {e}")
+            self._handle_error("Groq", e)
 
 
 class OllamaClient(BaseLLMClient):
     """Ollama (local) client."""
     
     def __init__(self, model: str = "llama3.2", base_url: str = "http://localhost:11434"):
-        """Initialize client.
-        
-        Args:
-            model: Model name.
-            base_url: Ollama API URL.
-        """
         import requests
         self.requests = requests
         self.model = model
         self.base_url = base_url.rstrip("/")
     
     def analyze(self, prompt: str) -> str:
-        """Analyze with Ollama."""
         try:
             response = self.requests.post(
                 f"{self.base_url}/api/chat",
@@ -186,35 +145,24 @@ class OllamaClient(BaseLLMClient):
             error_msg = str(e).lower()
             if "connection" in error_msg or "timeout" in error_msg:
                 raise LLMError(f"CONNECTION_ERROR: Ollama server not reachable at {self.base_url}")
-            else:
-                raise LLMError(f"Ollama API error: {e}")
+            self._handle_error("Ollama", e)
 
 
 def create_llm_client(config: Dict[str, Any]) -> BaseLLMClient:
-    """Create LLM client from configuration.
-    
-    Args:
-        config: LLM configuration.
-        
-    Returns:
-        LLM client instance.
-    """
+    """Create LLM client from configuration."""
     provider = config["provider"].lower()
     
-    if provider == "openai":
-        return OpenAIClient(
+    mapping = {
+        "openai": (OpenAIClient, "gpt-4o-mini"),
+        "anthropic": (AnthropicClient, "claude-3-5-haiku-20241022"),
+        "groq": (GroqClient, "llama-3.3-70b-versatile"),
+    }
+    
+    if provider in mapping:
+        cls, default_model = mapping[provider]
+        return cls(
             api_key=config["api_key"],
-            model=config.get("model", "gpt-4o-mini")
-        )
-    elif provider == "anthropic":
-        return AnthropicClient(
-            api_key=config["api_key"],
-            model=config.get("model", "claude-3-5-haiku-20241022")
-        )
-    elif provider == "groq":
-        return GroqClient(
-            api_key=config["api_key"],
-            model=config.get("model", "llama-3.3-70b-versatile")
+            model=config.get("model", default_model)
         )
     elif provider == "ollama":
         return OllamaClient(

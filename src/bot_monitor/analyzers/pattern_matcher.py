@@ -2,7 +2,7 @@
 
 import re
 from typing import List, Dict, Optional
-from .severity import Severity
+from ..monitors.base import Severity
 
 
 class SeverityPatternMatcher:

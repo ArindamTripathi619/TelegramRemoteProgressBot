@@ -65,6 +65,37 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo "   export PATH=\"$BIN_DIR:\$PATH\""
 fi
 
+# Optional Systemd Integration
+if [ -d "/etc/systemd/system" ] && [ "$EUID" -eq 0 ]; then
+    echo ""
+    read -p "❓ Do you want to generate a systemd service file? (y/N) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        SERVICE_FILE="/etc/systemd/system/telewatch.service"
+        echo "Creating $SERVICE_FILE..."
+        cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=TeleWatch Remote Process Monitor
+After=network.target
+
+[Service]
+Type=forking
+User=$SUDO_USER
+ExecStart=$BIN_DIR/bot-monitor start -d
+ExecStop=$BIN_DIR/bot-monitor stop
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload
+        echo "✅ Systemd service created and reloaded."
+        echo "   To start: systemctl start telewatch"
+        echo "   To enable on boot: systemctl enable telewatch"
+    fi
+fi
+
 echo ""
 echo "✓ Installation complete!"
 echo ""

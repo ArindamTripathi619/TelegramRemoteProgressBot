@@ -80,7 +80,8 @@ class Dashboard:
         table.add_row("⏱️  Uptime", uptime_str)
         table.add_row("🧠 LLM Calls", str(token_stats.get("llm_calls", 0)))
         table.add_row("🎟️  Tokens", str(token_stats.get("total_tokens", 0)))
-        table.add_row("💾 Cache Hits", f"{token_stats.get('cache_hit_rate', 0)}%")
+        table.add_row("💾 Cache Hits", f"{token_stats.get('cached_calls', 0)} ({token_stats.get('cache_hit_rate', 0)}%)")
+        table.add_row("🎯 Patterns", str(token_stats.get("pattern_matched", 0)))
         
         return Panel(
             table,
