@@ -27,7 +27,16 @@ def trim_context(content: str, max_lines: int = 15, include_timestamps: bool = F
     return '\n'.join(relevant_lines)
 
 
-def _strip_timestamp(line: str) -> str:
+    if not include_timestamps:
+        lines = [strip_timestamp(line) for line in lines]
+    
+    # Find error-relevant lines
+    relevant_lines = _extract_relevant_lines(lines, max_lines)
+    
+    return '\n'.join(relevant_lines)
+
+
+def strip_timestamp(line: str) -> str:
     """Remove common timestamp formats from line.
     
     Args:

@@ -44,6 +44,10 @@ class AnalysisCache:
         content = getattr(event, 'content', '')
         source = getattr(event, 'source', '')
         
+        # Strip timestamp to improve cache hit rate
+        from .context_optimizer import strip_timestamp
+        content = strip_timestamp(content)
+        
         # Extract first 200 chars for signature (enough to identify error type)
         content_preview = content[:200].strip()
         

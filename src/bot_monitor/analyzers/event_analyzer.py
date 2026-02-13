@@ -42,7 +42,7 @@ class EventAnalyzer:
         from .analysis_cache import AnalysisCache
         from .pattern_matcher import SeverityPatternMatcher, get_default_patterns
         from .token_tracker import TokenUsageTracker
-        from .context_optimizer import trim_context, estimate_tokens
+        from .context_optimizer import trim_context, estimate_tokens, strip_timestamp
         
         opt_config = optimization_config or {}
         
@@ -71,6 +71,7 @@ class EventAnalyzer:
         # Store optimizer functions
         self.trim_context = trim_context
         self.estimate_tokens = estimate_tokens
+        self.strip_timestamp = strip_timestamp
     
     def analyze_event(self, event: MonitorEvent) -> Analysis:
         """Analyze an event with optimized LLM usage.
