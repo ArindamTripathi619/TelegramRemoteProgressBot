@@ -19,7 +19,7 @@ def trim_context(content: str, max_lines: int = 15, include_timestamps: bool = F
     
     # Remove timestamps if requested
     if not include_timestamps:
-        lines = [_strip_timestamp(line) for line in lines]
+        lines = [strip_timestamp(line) for line in lines]
     
     # Find error-relevant lines
     relevant_lines = _extract_relevant_lines(lines, max_lines)
@@ -50,6 +50,7 @@ def strip_timestamp(line: str) -> str:
         r'^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[.,]\d+\s+',  # 2026-02-12 13:45:32.123
         r'^\d{2}:\d{2}:\d{2}[.,]\d+\s+',  # 13:45:32.123
         r'^\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]\s+',  # [2026-02-12 13:45:32]
+        r'^\[\d{2}:\d{2}:\d{2}\]\s+',  # [13:45:32]
         r'^\d{10,13}\s+',  # Unix timestamp
     ]
     
