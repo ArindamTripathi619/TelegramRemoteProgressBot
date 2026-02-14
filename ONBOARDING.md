@@ -1,89 +1,201 @@
 # TeleWatch Onboarding Guide 🚀
 
-Welcome to **TeleWatch**! This guide will help you go from "Just Installed" to "Mastering Remote Monitoring" in 10 minutes.
+Welcome to **TeleWatch** (also known as `bot-monitor`), your intelligent companion for remote process monitoring. This tool doesn't just "tail logs"—it understands them, tracks progress, and alerts you intelligently via Telegram.
 
 ---
 
-## 🏗️ 1. Initial Setup (The "Wizard" Way)
+## 📋 Table of Contents
 
-The fastest way to get started is the interactive setup wizard. It validates your credentials in real-time so you don't have to worry about typos.
+1. [Prerequisites](#1-prerequisites)
+2. [Installation](#2-installation)
+3. [Configuration (The Wizard)](#3-configuration-the-wizard)
+4. [Running TeleWatch](#4-running-telewatch)
+5. [Operating Modes](#5-operating-modes)
+6. [Command Reference](#6-command-reference)
+7. [Advanced Features](#7-advanced-features)
+8. [Troubleshooting](#8-troubleshooting)
+
+---
+
+## 🛠️ 1. Prerequisites
+
+Before you start, ensure you have:
+
+*   **Python**: Version 3.8 or higher (`python3 --version`).
+*   **Telegram Bot Token**: Created via [@BotFather](https://t.me/botfather).
+*   **Chat ID**: Your personal ID, retrieved via [@userinfobot](https://t.me/userinfobot) (usually a 9-10 digit number).
+*   **LLM API Key** (Optional but Recommended):
+    *   **Groq** (Fastest, Free Tier available) - *Recommended*
+    *   **OpenAI** (GPT-4o/mini)
+    *   **Anthropic** (Claude 3.5 Sonnet)
+    *   **Ollama** (Local/Offline)
+
+---
+
+## 📥 2. Installation
+
+### Option A: Install from Source (Developers)
+
+Best for active development or if you want the latest features.
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/DevCrewX/TelegramRemoteProgressBot.git
+cd TelegramRemoteProgressBot
+
+# 2. Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Install the package in editable mode
+pip install -e .
+```
+
+### Option B: Using the Standalone Binary (Coming Soon)
+Download the `telewatch` binary from the Releases page and make it executable:
+```bash
+chmod +x telewatch
+./telewatch --help
+```
+
+---
+
+## 🪄 3. Configuration (The Wizard)
+
+The fastest way to configure TeleWatch is using the interactive setup wizard. It validates your keys in real-time.
 
 ```bash
 bot-monitor setup
 ```
 
-**What you'll need ready:**
-1.  **Telegram Bot Token**: Create one via [@BotFather](https://t.me/botfather).
-2.  **Chat ID**: Get yours via [@userinfobot](https://t.me/userinfobot) (it's usually a 9 or 10 digit number).
-3.  **LLM API Key**: OpenAI, Anthropic, or Groq (Groq is highly recommended for its speed and free tier).
+**What the Wizard does:**
+1.  **Validates Telegram Credentials**: Sends a test message to your chat.
+2.  **Checks LLM Access**: Verifies your API key works.
+3.  **Creates Config**: Generates a secure `config.yaml` at `~/.telewatch/config.yaml`.
+4.  **Sets Permissions**: Enforces `chmod 600` on the config file for security.
 
 ---
 
-## 🕹️ 2. Mastering Interactive Commands
+## 🏃 4. Running TeleWatch
 
-Once your bot is running, you don't need to touch your terminal. Just message your bot directly:
+### Basic Usage
+Start monitoring interactively. You will see a live dashboard in your terminal.
 
-*   **`/status`**: "How is my job doing?" — Returns a weighted progress bar and a 1-sentence LLM summary of recent activity.
-*   **`/logs`**: "Show me what's happening." — Dumps the last 15 lines of the monitored log.
-*   **`/pause`**: "Wait, something's weird." — Suspends analysis if you need to manually intervene in your process without getting spam alerts.
-*   **`/resume`**: "Carry on." — Re-activates monitoring.
-
----
-
-## 🧬 3. Understanding Behavioral Sentinels
-
-TeleWatch doesn't just look for "ERROR". It understands how your process *behaves*:
-
-### 📈 Anomaly Detection
-If your log suddenly starts spitting out 100 lines per second (when usually it's 1), TeleWatch will alert you of a **Log Frequency Spike**.
-
-### 🧬 Structural Novelty
-If a new *type* of log line appears that looks like an error but doesn't match known patterns, TeleWatch uses its **Skeleton Hashing** to identify it as a "Structural Novelty" and analyzes it via LLM.
-
-### 🛑 Stall Detection
-If your process is supposed to be logging but hasn't said a word in 10 minutes, you'll get a **Stall Alert**.
-
----
-
-## 🏁 4. Advanced: Multi-Stage Tracking
-
-Don't just track 0-100%. Track the *phases* of your work. Update your `config.yaml`:
-
-```yaml
-process:
-  name: "Deep Learning Training"
-  stages:
-    - name: "Data Loading"
-      weight: 1           # 10% of total time
-      start_pattern: "Loading dataset"
-    - name: "Training"
-      weight: 8           # 80% of total time
-      start_pattern: "Epoch 1"
-    - name: "Evaluation"
-      weight: 1           # 10% of total time
-      start_pattern: "Starting Eval"
+```bash
+bot-monitor start
 ```
 
-TeleWatch will calculate your total progress across all phases and notify you when each 🚩 **Stage Transition** occurs.
+### Daemon Mode (Background)
+Run TeleWatch in the background. It will detach from your terminal and keep running even if you logout.
+
+```bash
+bot-monitor start --daemon
+```
+*   **Logs**: Output is redirected to `~/.telewatch/telewatch.log`
+*   **Control**: Use `bot-monitor status` or `bot-monitor stop` to manage it.
+
+### Turbo Mode (High Performance) ⚡
+For ultra-lean deployments (e.g., Raspberry Pi, small VPS) where you only need basic monitoring without heavy analysis.
+
+```bash
+bot-monitor start --turbo
+```
+*   **Disables**: Log Profiler (No structural learning), Anomaly Detector (No spike/stall checks).
+*   **Enables**: Basic pattern matching, keyword alerts, progress tracking.
+*   **Resource Usage**: Minimal CPU/RAM footprint.
 
 ---
 
-## 🧠 5. Historical Duration Learning
+## 🕹️ 5. Operating Modes
 
-TeleWatch remembers. Every time your process completes, it saves the duration to `~/.telewatch/history.json`.
-
-**The Magic:** If you don't know how long your process will take, leave `expected_duration_minutes` blank. TeleWatch will automatically use the average of your last few runs to calculate completion time.
-
----
-
-## ⚡ 6. Efficiency Tips
-
-1.  **Use Groq**: It's incredibly fast and fits perfectly with TeleWatch's lightweight philosophy.
-2.  **Fuzzy Caching**: TeleWatch automatically caches similar logs. You only pay for LLM analysis *once* for structurally identical error patterns.
-3.  **Daemon Mode**: Use `bot-monitor start --daemon` to run in the background.
+| Mode | Description | Best For | Flags |
+| :--- | :--- | :--- | :--- |
+| **Interactive** | Live TUI dashboard with real-time logs. | Debugging, initial set up. | `start` |
+| **Daemon** | Runs silently in background. | Long-running servers, training jobs. | `start --daemon` |
+| **Turbo** | Minimal resource usage, core features only. | Edge devices, low-latency needs. | `start --turbo` |
 
 ---
 
-## 🆘 Need Help?
-- Run `bot-monitor --help` for a list of all commands.
-- Check the [README.md](./README.md) for detailed architecture and configuration options.
+## 📖 6. Command Reference
+
+All commands are prefixed with `bot-monitor`.
+
+| Command | Description | Key Options |
+| :--- | :--- | :--- |
+| `setup` | Run configuration wizard. | None |
+| `start` | Start the monitoring process. | `--daemon` (`-d`), `--turbo`, `--config PATH` |
+| `status` | Check if daemon is running. | None |
+| `stop` | Stop the background daemon. | None |
+| `notify` | Send a one-off test message. | `--message "Hello"` |
+
+**Example:**
+```bash
+# Start in background with custom config
+bot-monitor start --daemon --config ./my_config.yaml
+```
+
+---
+
+## 💬 7. In-Chat Commands
+
+Control TeleWatch directly from Telegram!
+
+*   **`/status`**: "How is it going?"
+    *   Returns: Progress bar, current stage, and a 1-sentence LLM summary.
+*   **`/logs`**: "Show me details."
+    *   Returns: The last 15 lines of logs.
+*   **`/pause`**: "Hold on."
+    *   Action: Pauses alerts and LLM analysis. Useful if you're manually fixing something and don't want spam.
+*   **`/resume`**: "Continue."
+    *   Action: Re-enables monitoring.
+
+---
+
+## 🧠 8. Advanced Features
+
+### 🔍 Auto-Profiling & Drift Detection
+TeleWatch learns the "shape" of your logs (JSON, CSV, Syslog).
+*   **Profiling**: The first 50-100 lines build a baseline.
+*   **Drift**: If logs suddenly change format (e.g., app crashes and prints stack traces instead of JSON), it alerts you.
+
+### 📈 Anomaly Detection
+*   **Spikes**: Alerts if log volume explodes (e.g., infinite loop).
+*   **Stalls**: Alerts if logs stop coming for `stall_seconds` (default: 300s).
+*   **Novelty**: If a **new type** of error appears that hasn't been seen before, it triggers an LLM analysis. Known errors are cached to save tokens.
+
+### 📊 Multi-Stage Tracking
+Track specific phases of your job in `config.yaml`:
+```yaml
+process:
+  stages:
+    - name: "Data Loading"
+      start_pattern: "Loading dataset"
+      weight: 1
+    - name: "Training"
+      start_pattern: "Epoch"
+      weight: 8
+```
+TeleWatch will notify you as each stage begins!
+
+---
+
+## ❓ 8. Troubleshooting
+
+**Q: "Config not found!"**
+A: Run `bot-monitor setup` or specify a file with `--config path/to/config.yaml`.
+
+**Q: Telegram commands aren't working.**
+A: Ensure your bot has `Privacy Mode` **disabled** in @BotFather so it can read your messages, or strictly address it in a group. In 1-on-1 chats, it should work by default.
+
+**Q: I'm getting too many alerts.**
+A: Adjust `rate_limit_per_hour` in `config.yaml`. The default is 50.
+
+**Q: It's using too many tokens.**
+A: Enable optimizations in config or use specific patterns to skip LLM calls. Alternatively, used `--turbo` mode to disable heavy analysis.
+
+---
+
+*Found a bug? Open an issue on GitHub!*
