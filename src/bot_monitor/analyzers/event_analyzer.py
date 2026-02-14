@@ -379,7 +379,7 @@ Respond ONLY with valid JSON.
             stats['cache_stats'] = cache_stats
         
         # Add profiler progress
-        if hasattr(self, 'profiler'):
+        if self.profiler:
             stats['profiler_progress'] = len(self.profiler.samples) / self.profiler.sample_limit
             
         # Add dynamic patterns count
@@ -388,13 +388,16 @@ Respond ONLY with valid JSON.
             stats['dynamic_patterns'] = dynamic_count
             
         # Add anomaly stats
-        if hasattr(self, 'anomaly_detector'):
+        if self.anomaly_detector:
             stats['anomaly_stats'] = self.anomaly_detector.get_stats()
             
         return stats
     
     def check_stall(self) -> Optional[Analysis]:
         """Check for log stream stall."""
+        if not self.anomaly_detector:
+            return None
+            
         anomaly = self.anomaly_detector.check_stall()
         if anomaly:
             analysis = Analysis(
