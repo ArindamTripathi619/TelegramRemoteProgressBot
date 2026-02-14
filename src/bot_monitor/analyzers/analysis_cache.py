@@ -2,7 +2,8 @@
 
 import hashlib
 import time
-from typing import Optional, Dict, Any
+import re
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from collections import OrderedDict
 
@@ -56,6 +57,39 @@ class AnalysisCache:
         
         # Hash it
         return hashlib.sha256(signature_input.encode()).hexdigest()[:16]
+
+    def _compute_fuzzy_signature(self, event) -> str:
+        """Compute a structural 'skeleton' signature for an event.
+        
+        Masks numbers, IDs, and common variable fragments to catch similar errors.
+        
+        Args:
+            event: Event object to hash.
+            
+        Returns:
+            Fuzzy hash signature.
+        """
+        content = getattr(event, 'content', '')
+        source = getattr(event, 'source', '')
+        
+        # 1. Strip timestamp
+        from .context_optimizer import strip_timestamp
+        content = strip_timestamp(content)
+        
+        # 2. Skeletonize: Mask numbers and hex IDs
+        # Replace numbers with '0'
+        skeleton = re.sub(r'\d+', '0', content)
+        # Replace hex items (e.g. memory addresses 0x7f...)
+        skeleton = re.sub(r'0x[0-9a-fA-F]+', '0xX', skeleton)
+        # Replace common ID-like strings (uuid-like)
+        skeleton = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', 'UUID', skeleton)
+        
+        # 3. Take preview
+        skeleton_preview = skeleton[:200].strip()
+        
+        # 4. Hash it with a 'fuzzy:' prefix to avoid exact collision
+        signature_input = f"fuzzy:{source}:{skeleton_preview}"
+        return hashlib.sha256(signature_input.encode()).hexdigest()[:16]
     
     def get(self, event) -> Optional[Any]:
         """Get cached analysis for event.
@@ -66,17 +100,26 @@ class AnalysisCache:
         Returns:
             Cached Analysis object or None if not found/expired.
         """
+        # 1. Try exact match
         signature = self._compute_signature(event)
         
-        if signature not in self.cache:
-            self.misses += 1
-            return None
-        
+        if signature in self.cache:
+            return self._handle_hit(signature)
+            
+        # 2. Try fuzzy match
+        fuzzy_signature = self._compute_fuzzy_signature(event)
+        if fuzzy_signature in self.cache:
+            return self._handle_hit(fuzzy_signature)
+            
+        self.misses += 1
+        return None
+
+    def _handle_hit(self, signature: str) -> Optional[Any]:
+        """Process a cache hit."""
         cached = self.cache[signature]
         
         # Check if expired
         if time.time() - cached.timestamp > self.ttl_seconds:
-            # Remove expired entry
             del self.cache[signature]
             self.misses += 1
             return None
@@ -95,14 +138,20 @@ class AnalysisCache:
             event: Event that was analyzed.
             analysis: Analysis result to cache.
         """
-        signature = self._compute_signature(event)
+        # Add both exact and fuzzy signatures to cache
+        # This allows future lookups to hit via either
+        exact_sig = self._compute_signature(event)
+        fuzzy_sig = self._compute_fuzzy_signature(event)
         
-        # Add to cache
-        self.cache[signature] = CachedAnalysis(
+        cached_obj = CachedAnalysis(
             analysis=analysis,
             timestamp=time.time(),
             hit_count=0
         )
+        
+        # Store under both (OrderedDict handles updates)
+        self.cache[exact_sig] = cached_obj
+        self.cache[fuzzy_sig] = cached_obj
         
         # Enforce max size (LRU eviction)
         if len(self.cache) > self.max_entries:

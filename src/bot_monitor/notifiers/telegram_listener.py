@@ -65,9 +65,21 @@ class TelegramListener:
                     
                     logger.info(f"Received message: {message_text[:50]}...")
                     
+                    # Detect command
+                    is_command = message_text.startswith("/")
+                    command_name = None
+                    command_args = []
+                    
+                    if is_command:
+                        parts = message_text[1:].split()
+                        if parts:
+                            command_name = parts[0].lower()
+                            command_args = parts[1:]
+                    
                     # Trigger callback
                     if self.on_message_callback:
-                        self.on_message_callback(message_text)
+                        # Pass text, is_command, name, and args
+                        self.on_message_callback(message_text, is_command, command_name, command_args)
                     
                     message_received = True
             

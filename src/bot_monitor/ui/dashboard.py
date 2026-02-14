@@ -102,6 +102,11 @@ class Dashboard:
         table.add_row("💾 Cache Hits", f"{token_stats.get('cached_calls', 0)} ({token_stats.get('cache_hit_rate', 0)}%)")
         table.add_row("🎯 Patterns", f"{token_stats.get('pattern_matched', 0)} (+{token_stats.get('dynamic_patterns', 0)} dynamic)")
         
+        # Add anomaly stats
+        anomaly_stats = token_stats.get("anomaly_stats", {})
+        table.add_row("📈 Frequency", f"{anomaly_stats.get('frequency', 0.0):.1f} L/min")
+        table.add_row("🔍 Structures", str(anomaly_stats.get("known_structures", 0)))
+        
         return Panel(
             table,
             title="Statistics",

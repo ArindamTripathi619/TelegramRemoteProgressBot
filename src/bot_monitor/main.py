@@ -127,7 +127,16 @@ def _run_monitor(config_path: Path, daemon: bool):
                 
                 # Update manager to update state
                 def on_progress(p, msg):
-                    state_manager.update_status(p, msg, "running")
+                    # Get behavioral stats
+                    a_stats = manager.analyzer.anomaly_detector.get_stats() if hasattr(manager.analyzer, 'anomaly_detector') else {}
+                    
+                    state_manager.update_status(
+                        p, msg, "running",
+                        frequency=a_stats.get('frequency', 0.0),
+                        structures=a_stats.get('known_structures', 0),
+                        stalled=(p == 0.0 and msg.startswith("⚠️")) # Simple heuristic if manager doesn't pass it
+                    )
+                    
                     if not daemon:
                         # Fetch latest state to render
                         current_state = state_manager.load_state()
@@ -146,9 +155,16 @@ def _run_monitor(config_path: Path, daemon: bool):
                 
         else:
             # Daemon mode - just run
-            # We need to ensure manager updates the state file periodically
             def on_progress(p, msg):
-                state_manager.update_status(p, msg, "running")
+                # Get behavioral stats
+                a_stats = manager.analyzer.anomaly_detector.get_stats() if hasattr(manager.analyzer, 'anomaly_detector') else {}
+                
+                state_manager.update_status(
+                    p, msg, "running",
+                    frequency=a_stats.get('frequency', 0.0),
+                    structures=a_stats.get('known_structures', 0),
+                    stalled=(p == 0.0 and msg.startswith("⚠️"))
+                )
                 
             manager.set_ui_callback(on_progress)
             manager.start()

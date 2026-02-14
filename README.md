@@ -6,28 +6,22 @@ Monitor long-running processes on remote servers, get intelligent alerts when th
 
 ## Features
 
-✅ **Universal Monitoring**
-- 📄 Log files (with keyword filtering)
-- 🔢 Process monitoring by PID
-- 📋 Systemd journal tracking
+✅ **Behavioral Sentinels**
+- 📈 Log frequency spike detection
+- 🛑 Log stream stall detection
+- 🧬 Structural novelty detection (detecting new error types)
+- 🧠 Historical duration learning (auto-estimates)
 
-✅ **LLM-Powered Analysis**
-- Intelligent error detection
-- Root cause analysis
-- Actionable suggestions
-- Context-aware event correlation
+✅ **Interactive Control**
+- 🕹️ Process status on demand (`/status`)
+- ⏸️ Pause/Resume monitoring remotely
+- 📋 Live log snippets via Telegram (`/logs`)
+- 🏁 Multi-stage progress tracking
 
-✅ **Multi-Provider Support**
-- OpenAI (GPT-4o-mini)
-- Anthropic (Claude)
-- Groq (Llama 3.3 - Fast & Free)
-- Ollama (Local/Private)
-
-✅ **Smart Notifications**
-- Rate limiting (avoid spam)
-- Severity-based filtering
-- Formatted Telegram messages
-- Emoji indicators 🔴🟡🟢
+✅ **Optimized Efficiency**
+- ⚡ Fuzzy caching (skeleton hashing to reduce LLM costs)
+- ✂️ Context trimming & timestamp stripping
+- 📦 Lightweight footprint (<20MB RAM)
 
 ## 🚀 Quick Start
 
@@ -151,18 +145,37 @@ monitors:
     unit: "nginx.service"
 ```
 
-### Run
+### Interactive Commands
 
-```bash
-# Start monitoring
-bot-monitor start
+TeleWatch supports real-time interaction via your Telegram bot:
 
-# Test notifications
-bot-monitor test-notification
+| Command | Action |
+|---------|--------|
+| `/status` | Get a detailed progress report with LLM summary |
+| `/pause` | Temporarily suspend analysis and notifications |
+| `/resume` | Re-activate monitoring |
+| `/logs` | Get the last 15 lines of log output |
 
-# Use custom config
-bot-monitor -c /path/to/config.yaml start
+### Multi-Stage Tracking
+
+Monitor complex pipelines by defining stages in your config:
+
+```yaml
+process:
+  name: "Production Pipeline"
+  stages:
+    - name: "Data Sync"
+      weight: 1
+      start_pattern: "starting sync"
+    - name: "ML Training"
+      weight: 4
+      start_pattern: "epoch 1"
+    - name: "Deployment"
+      weight: 1
+      start_pattern: "deploying to prod"
 ```
+
+TeleWatch will automatically calculate a weighted progress percentage and alert you on stage transitions.
 
 ## Use Cases
 

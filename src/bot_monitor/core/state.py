@@ -15,6 +15,10 @@ class BotState:
     progress: float
     message: str
     last_update: float
+    # Behavioral metrics
+    log_frequency: float = 0.0
+    known_structures: int = 0
+    is_stalled: bool = False
     
     @classmethod
     def empty(cls) -> 'BotState':
@@ -25,7 +29,10 @@ class BotState:
             process_name="",
             progress=0.0,
             message="Not running",
-            last_update=0.0
+            last_update=0.0,
+            log_frequency=0.0,
+            known_structures=0,
+            is_stalled=False
         )
 
 class StateManager:
@@ -60,17 +67,17 @@ class StateManager:
         except Exception:
             return BotState.empty()
 
-    def update_status(self, progress: float, message: str, status: str = "running"):
+    def update_status(self, progress: float, message: str, status: str = "running", 
+                      frequency: float = 0.0, structures: int = 0, stalled: bool = False):
         """Update specific fields in the state."""
         current = self.load_state()
         
-        # If we are the running process, update live fields
-        # Note: In a real scenario, we might want to keep most fields in memory 
-        # and only write periodically, but for CLI 'status' command we need 
-        # frequent writes or shared memory. For simplicity, we write on update.
         current.progress = progress
         current.message = message
         current.status = status
+        current.log_frequency = frequency
+        current.known_structures = structures
+        current.is_stalled = stalled
         current.last_update = time.time()
         
         # If we just started, PID might not be set in the loaded state 

@@ -1,7 +1,8 @@
 """Event analysis logic."""
 
 import json
-from typing import Dict, Any, List
+import time
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from collections import deque
 
@@ -44,6 +45,7 @@ class EventAnalyzer:
         from .token_tracker import TokenUsageTracker
         from .context_optimizer import trim_context, estimate_tokens, strip_timestamp
         from .log_profiler import LogProfiler
+        from .anomaly_detector import AnomalyDetector
         
         opt_config = optimization_config or {}
         
@@ -64,6 +66,11 @@ class EventAnalyzer:
         # Initialize log profiler
         self.profiler = LogProfiler(sample_limit=opt_config.get('profiler_limit', 50))
         
+        # Initialize anomaly detector
+        self.anomaly_detector = AnomalyDetector(
+            stall_seconds=opt_config.get('stall_seconds', 300)
+        )
+        
         # Token usage tracking
         self.token_tracker = token_tracker or TokenUsageTracker()
         
@@ -77,6 +84,8 @@ class EventAnalyzer:
         self.estimate_tokens = estimate_tokens
         self.strip_timestamp = strip_timestamp
     
+        self.pending_anomalies: List[Analysis] = []
+        
     def analyze_event(self, event: MonitorEvent) -> Analysis:
         """Analyze an event with optimized LLM usage.
         
@@ -86,11 +95,35 @@ class EventAnalyzer:
         Returns:
             Analysis result.
         """
-        # 0. Background Profiling
+        # 0. Background Profiling & Anomaly Detection
         self.profiler.add_sample(event.content)
+        anomaly_results = self.anomaly_detector.add_event(event.content)
         
-        # 1. Check cache first
-        if self.cache:
+        # Collect spike anomalies
+        for anomaly in anomaly_results.get("anomalies", []):
+            if anomaly["type"] == "spike":
+                spike_analysis = Analysis(
+                    severity=Severity.WARNING,
+                    summary="📈 LOG FREQUENCY SPIKE",
+                    root_cause=anomaly["message"],
+                    suggested_action="Check for crash loops or debug logging being enabled.",
+                    original_event=MonitorEvent(
+                        source="AnomalyDetector",
+                        severity=Severity.WARNING,
+                        content=anomaly["message"],
+                        timestamp=time.time(),
+                        metadata={"type": "spike"}
+                    )
+                )
+                self.pending_anomalies.append(spike_analysis)
+                with open("/home/DevCrewX/.telewatch/telewatch.log", "a") as f:
+                    f.write(f"ANOMALY: {spike_analysis.summary} - {spike_analysis.root_cause}\n")
+        
+        # 1. Structural Novelty - Force LLM if novel and not INFO
+        force_llm = anomaly_results.get("is_novel", False) and event.severity != Severity.INFO
+        
+        # 2. Check cache first (skip if novel to ensure fresh analysis)
+        if self.cache and not force_llm:
             cached = self.cache.get(event)
             if cached is not None:
                 self.token_tracker.record_cache_hit()
@@ -130,7 +163,7 @@ class EventAnalyzer:
             return analysis
         
         # 4. Use LLM analysis with optimized context
-        analysis = self._llm_analysis(event)
+        analysis = self._llm_analysis(event, is_novel=force_llm)
         
         # Cache LLM result
         if self.cache:
@@ -138,14 +171,14 @@ class EventAnalyzer:
             
         return analysis
     
-    def _llm_analysis(self, event: MonitorEvent) -> Analysis:
+    def _llm_analysis(self, event: MonitorEvent, is_novel: bool = False) -> Analysis:
         """Perform LLM-based analysis."""
         # Build context from history
         history_list = list(self.event_history)
         context_events = history_list[-self.context_size:] if history_list else []
         
         # Create prompt
-        prompt = self._build_prompt(event, context_events)
+        prompt = self._build_prompt(event, context_events, is_novel=is_novel)
         
         try:
             # Get LLM analysis
@@ -197,12 +230,13 @@ class EventAnalyzer:
                     original_event=event
                 )
     
-    def _build_prompt(self, event: MonitorEvent, context: List[MonitorEvent]) -> str:
+    def _build_prompt(self, event: MonitorEvent, context: List[MonitorEvent], is_novel: bool = False) -> str:
         """Build optimized analysis prompt.
         
         Args:
             event: Current event.
             context: Previous events for context.
+            is_novel: Whether this is a novel structural event.
             
         Returns:
             Formatted prompt with trimmed context.
@@ -250,7 +284,9 @@ Content:
 
 Respond ONLY with valid JSON.
 """
-        
+        if is_novel:
+            prompt = "NOVEL LOG STRUCTURE DETECTED. " + prompt
+            
         return prompt
     
     def _parse_response(self, response: str, event: MonitorEvent) -> Analysis:
@@ -336,7 +372,33 @@ Respond ONLY with valid JSON.
             dynamic_count = sum(len(p) for p in self.pattern_matcher.dynamic_patterns.values())
             stats['dynamic_patterns'] = dynamic_count
             
+        # Add anomaly stats
+        if hasattr(self, 'anomaly_detector'):
+            stats['anomaly_stats'] = self.anomaly_detector.get_stats()
+            
         return stats
+    
+    def check_stall(self) -> Optional[Analysis]:
+        """Check for log stream stall."""
+        anomaly = self.anomaly_detector.check_stall()
+        if anomaly:
+            analysis = Analysis(
+                severity=Severity.CRITICAL,
+                summary="⚠️ LOG STREAM STALLED",
+                root_cause=anomaly["message"],
+                suggested_action="Check if the monitored process is still running or if log rotation broke the stream.",
+                original_event=MonitorEvent(
+                    source="AnomalyDetector",
+                    severity=Severity.CRITICAL,
+                    content=anomaly["message"],
+                    timestamp=time.time(),
+                    metadata={"type": "stall"}
+                )
+            )
+            with open("/home/DevCrewX/.telewatch/telewatch.log", "a") as f:
+                f.write(f"ANOMALY: {analysis.summary} - {analysis.root_cause}\n")
+            return analysis
+        return None
     
     def get_stats_summary(self, period: str = "current") -> str:
         """Get formatted statistics summary.

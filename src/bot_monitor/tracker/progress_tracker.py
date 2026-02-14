@@ -44,6 +44,23 @@ class ProgressTracker:
         self.update_interval = config.get("update_interval_percent", 10)
         self.min_update_interval = config.get("min_update_interval_seconds", 300)
         self.last_update_time = datetime.now()
+        
+        # Multi-stage tracking
+        self.stages: List[Dict] = config.get("stages", [])
+        self.current_stage_idx = 0
+        self.stage_weights = self._calculate_stage_weights()
+    
+    def _calculate_stage_weights(self) -> List[float]:
+        """Calculate weighted contribution of each stage to total progress."""
+        if not self.stages:
+            return []
+        
+        # Use provided weights or assume equal if missing
+        weights = [float(s.get("weight", 1.0)) for s in self.stages]
+        total_weight = sum(weights)
+        if total_weight > 0:
+            return [w / total_weight for w in weights]
+        return [1.0 / len(self.stages)] * len(self.stages)
     
     def add_log_line(self, line: str) -> None:
         """Add a log line for analysis.
@@ -112,9 +129,45 @@ class ProgressTracker:
             (r"completed:\s*(\d+(?:\.\d+)?)%", "percentage"),
         ]
         
+        # Check for stage transitions
+        if self.stages and self.current_stage_idx < len(self.stages):
+            next_stage_idx = self.current_stage_idx + 1
+            if next_stage_idx < len(self.stages):
+                next_stage_pattern = self.stages[next_stage_idx].get("start_pattern")
+                if next_stage_pattern:
+                    for line in reversed(self.recent_logs[-10:]):
+                        if re.search(next_stage_pattern, line, re.IGNORECASE):
+                            self.current_stage_idx = next_stage_idx
+                            print(f"🚩 Transitioned to stage: {self.stages[self.current_stage_idx].get('name')}")
+                            break
+
         for line in reversed(self.recent_logs[-20:]):
             line_lower = line.lower()
             
+            # 1. Logic for stage-based weighted progress
+            if self.stages:
+                # Add stage-relative progress to baseline progress of previous stages
+                base_percent = sum(self.stage_weights[:self.current_stage_idx]) * 100
+                current_stage_weight = self.stage_weights[self.current_stage_idx]
+                
+                # Check for percentage match in current stage
+                for pattern, ptype in common_patterns:
+                    match = re.search(pattern, line_lower)
+                    if match:
+                        if ptype == "percentage":
+                            stage_pct = float(match.group(1))
+                            return base_percent + (stage_pct * current_stage_weight)
+                        elif ptype == "fraction":
+                            current = float(match.group(1))
+                            total = float(match.group(2))
+                            if total > 0:
+                                stage_pct = (current / total) * 100
+                                return base_percent + (stage_pct * current_stage_weight)
+                
+                # If no percentage found but in a stage, return just the base
+                return base_percent
+
+            # 2. Original simple logic (no stages)
             for pattern, ptype in common_patterns:
                 match = re.search(pattern, line_lower)
                 if match:

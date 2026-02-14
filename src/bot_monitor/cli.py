@@ -26,6 +26,7 @@ class MonitorManager:
         self.config = config
         self.monitors: List[BaseMonitor] = []
         self.running = False
+        self.paused = False  # New paused state
         
         # Initialize LLM and notifier
         llm_config = config.get_llm_config()
@@ -59,7 +60,9 @@ class MonitorManager:
         from .tracker import ProgressTracker
         from .generators import StatusReportGenerator
         from .notifiers.telegram_listener import TelegramListener
+        from .core.history import HistoryManager
         
+        self.history_manager = HistoryManager()
         progress_config = config.get_progress_tracking_config()
         process_config = config.get_process_config()
         interactive_config = config.get_interactive_config()
@@ -79,6 +82,13 @@ class MonitorManager:
                 self.llm_client,
                 token_tracker=self.token_tracker
             )
+            # Use historical duration if not in config
+            if not self.progress_tracker.expected_duration:
+                avg_duration = self.history_manager.get_average_duration(process_config['name'])
+                if avg_duration > 0:
+                    self.progress_tracker.expected_duration = avg_duration / 60  # minutes
+                    print(f"✓ Using historical average duration: {self.progress_tracker.expected_duration:.1f}m")
+            
             print(f"✓ Progress tracking enabled for: {process_config['name']}")
         
         # Initialize message listener if interactive features enabled
@@ -167,9 +177,13 @@ class MonitorManager:
         """Main event processing loop."""
         import time
         last_progress_check = time.time()
-        progress_check_interval = 10  # Check progress every 10 seconds
+        progress_check_interval = 2  # Check progress every 2 seconds
         
         while self.running:
+            if self.paused:
+                time.sleep(1)
+                continue
+                
             current_time = time.time()
             
             # Collect events from all monitors
@@ -191,60 +205,49 @@ class MonitorManager:
                             
                         analysis = self.analyzer.analyze_event(event)
                         
-                        # Send notification
-                        success = self.notifier.send_analysis(analysis)
-                        
-                        if success:
+                        # Handle main analysis
+                        if self.notifier.send_analysis(analysis):
                             print(f"📤 Sent: {analysis.summary}")
-                        else:
-                            print(f"⏸️  Skipped: {analysis.summary} (rate limit)")
+                        
+                        # Handle any side anomalies (e.g. spikes)
+                        while getattr(self.analyzer, 'pending_anomalies', []):
+                            side_analysis = self.analyzer.pending_anomalies.pop(0)
+                            if self.notifier.send_analysis(side_analysis):
+                                print(f"📤 Sent side-analysis: {side_analysis.summary}")
                     
                     except Exception as e:
                         print(f"Error processing event: {e}")
             
-            # Progress tracking logic
-            if self.progress_tracker and (current_time - last_progress_check) >= progress_check_interval:
+            # Periodic behavioral metrics and stall tracking
+            if (current_time - last_progress_check) >= progress_check_interval:
                 last_progress_check = current_time
                 
                 try:
-                    # Estimate progress
-                    estimated = self.progress_tracker.estimate_progress()
+                    # 1. Update UI/State with behavioral metrics
+                    p_val = 0.0
+                    p_msg = "Monitoring active"
                     
-                    if estimated is not None:
-                        # Update UI/State
-                        if self.ui_callback:
-                            self.ui_callback(estimated, "Monitoring active")
-                            
-                        # Check if we should send milestone update
-                        if self.progress_tracker.should_send_update():
-                            current_pct = self.progress_tracker.current_percentage
-                            milestone_pct = int(current_pct)
-                            milestone = (milestone_pct // 10) * 10  # Round to nearest 10%
-                            
-                            if current_pct >= 99.9: # Treat 99.9+ as complete
-                                # Process Complete!
-                                report = self.report_generator.generate_completion_report(self.progress_tracker)
-                                print(f"🎉 Process completed!")
-                            else:
-                                # Generate and send milestone report with analysis
-                                report = self.report_generator.generate_milestone_report(
-                                    self.progress_tracker,
-                                    milestone,
-                                    include_llm_summary=True
-                                )
-                                print(f"📊 Progress update sent: {milestone}%")
-                            
-                            self.notifier.send_message(report)
-                            self.progress_tracker.mark_update_sent()
+                    if self.progress_tracker:
+                        p_val = self.progress_tracker.estimate_progress() or 0.0
                         
-                        # Check for stall
+                        # Check for milestones and stall (specific to progress)
+                        if self.progress_tracker.should_send_update():
+                            self._handle_milestone()
+                        
                         if self.progress_tracker.is_stalled():
-                            stall_msg = f"⚠️ **Warning:** {self.progress_tracker.process_name} appears stalled at {self.progress_tracker.current_percentage:.1f}%"
-                            self.notifier.send_message(stall_msg)
-                            print("⚠️  Stall alert sent")
+                            self._handle_progress_stall()
+                    
+                    if self.ui_callback:
+                        self.ui_callback(p_val, p_msg)
+                            
+                    # 2. Check for general log stream stall
+                    stall_analysis = self.analyzer.check_stall()
+                    if stall_analysis:
+                        self.notifier.send_analysis(stall_analysis)
+                        print(f"⚠️  {stall_analysis.summary} alert sent")
                 
                 except Exception as e:
-                    print(f"Progress tracking error: {e}")
+                    print(f"Periodic check error: {e}")
             
             # Poll for user messages
             if self.message_listener:
@@ -261,32 +264,92 @@ class MonitorManager:
             # Sleep briefly
             time.sleep(1)
     
-    def _handle_user_message(self, message_text: str):
-        """Handle incoming user message by sending status report.
+    def _handle_milestone(self):
+        """Handle progress milestone reached."""
+        current_pct = self.progress_tracker.current_percentage
+        milestone_pct = int(current_pct)
+        milestone = (milestone_pct // 10) * 10  # Round to nearest 10%
         
-        Args:
-            message_text: The message text (ignored, any message triggers report).
-        """
-        print(f"📩 User message received, generating status report...")
+        if current_pct >= 99.9: # Treat 99.9+ as complete
+            # Process Complete!
+            report = self.report_generator.generate_completion_report(self.progress_tracker)
+            print(f"🎉 Process completed!")
+            
+            # Record in history
+            duration = (datetime.now() - self.progress_tracker.start_time).total_seconds()
+            self.history_manager.record_run(
+                self.progress_tracker.process_name,
+                self.progress_tracker.start_time,
+                duration,
+                "completed"
+            )
+        else:
+            # Generate and send milestone report with analysis
+            report = self.report_generator.generate_milestone_report(
+                self.progress_tracker,
+                milestone,
+                include_llm_summary=True
+            )
+            print(f"📊 Progress update sent: {milestone}%")
         
+        self.notifier.send_message(report)
+        self.progress_tracker.mark_update_sent()
+        
+    def _handle_progress_stall(self):
+        """Handle progress tracker specifically stalled."""
+        stall_msg = f"⚠️ **Warning:** {self.progress_tracker.process_name} appears stalled at {self.progress_tracker.current_percentage:.1f}%"
+        self.notifier.send_message(stall_msg)
+        print("⚠️  Progress stall alert sent")
+
+    def _handle_user_message(self, text: str, is_command: bool = False, cmd: str = None, args: List[str] = None):
+        """Handle incoming user message or command."""
+        if not is_command:
+            # Default behavior for non-commands (if configured)
+            interactive_config = self.config.get_interactive_config()
+            if interactive_config.get("status_on_any_message"):
+                self._send_status_report()
+            return
+
+        print(f"📩 Command received: /{cmd} {args}")
+        
+        if cmd == "status":
+            self._send_status_report()
+        elif cmd == "pause":
+            self.paused = True
+            self.notifier.send_message("⏸️ **Monitoring Paused.** Monitors are still active but analysis is suspended.")
+            print("⏸️ Monitoring paused")
+        elif cmd == "resume":
+            self.paused = False
+            self.notifier.send_message("▶️ **Monitoring Resumed.**")
+            print("▶️ Monitoring resumed")
+        elif cmd == "logs":
+            self._send_recent_logs()
+        else:
+            self.notifier.send_message(f"❓ **Unknown command:** /{cmd}\nAvailable: /status, /pause, /resume, /logs")
+
+    def _send_status_report(self):
+        """Generate and send full status report."""
         try:
             if self.progress_tracker and self.report_generator:
-                # Generate full status report
                 report = self.report_generator.generate_report(
                     self.progress_tracker,
                     include_llm_summary=True
                 )
-                
                 self.notifier.send_message(report)
-                print("✓ Status report sent")
             else:
-                # Send simple status
-                self.notifier.send_message(
-                    "✓ Bot-monitor is running and monitoring your processes."
-                )
+                self.notifier.send_message("✓ TeleWatch is running and active.")
         except Exception as e:
-            print(f"Error sending status report: {e}")
-    
+            print(f"Error sending status: {e}")
+
+    def _send_recent_logs(self):
+        """Send a snippet of recent logs."""
+        if not self.progress_tracker or not self.progress_tracker.recent_logs:
+            self.notifier.send_message("No logs available yet.")
+            return
+            
+        logs = "\n".join(self.progress_tracker.recent_logs[-15:])
+        self.notifier.send_message(f"📋 **Recent Logs:**\n```\n{logs}\n```")
+
     def stop(self):
         """Stop all monitors."""
         self.running = False
