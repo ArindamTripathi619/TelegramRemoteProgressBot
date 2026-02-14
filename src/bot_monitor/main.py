@@ -92,8 +92,13 @@ def stop():
     except Exception as e:
         console.print(f"[red]❌ Error stopping process: {e}[/red]")
 
-def _start_daemon(config_path: Path):
-    """Fork and start background process."""
+def _start_daemon(config_path: Path, turbo: bool = False):
+    """Fork and start background process.
+    
+    Args:
+        config_path: Path to configuration file
+        turbo: Enable turbo mode (disable profiling & novelty detection)
+    """
     console.print("[bold green]🚀 Starting TeleWatch in background...[/bold green]")
     
     pid = os.fork()
@@ -127,10 +132,16 @@ def _start_daemon(config_path: Path):
     setup_logger(log_file=log_file)
     logger.info("TeleWatch daemonized successfully.")
     
-    _run_monitor(config_path, daemon=True)
+    _run_monitor(config_path, daemon=True, turbo=turbo)
 
-def _run_monitor(config_path: Path, daemon: bool):
-    """Main monitoring loop."""
+def _run_monitor(config_path: Path, daemon: bool, turbo: bool = False):
+    """Main monitoring loop.
+    
+    Args:
+        config_path: Path to configuration file
+        daemon: Run in background mode
+        turbo: Enable turbo mode (disable profiling & novelty detection)
+    """
     try:
         conf = Config(config_path)
         manager = MonitorManager(conf)
