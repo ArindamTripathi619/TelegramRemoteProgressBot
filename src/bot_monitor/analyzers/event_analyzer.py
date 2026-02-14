@@ -25,15 +25,19 @@ class EventAnalyzer:
     
     def __init__(self, llm_client: BaseLLMClient, context_size: int = 10, 
                  optimization_config: Dict[str, Any] = None,
-                 token_tracker = None):
+                 token_tracker = None,
+                 turbo: bool = False):
         """Initialize analyzer.
         
         Args:
             llm_client: LLM client.
             context_size: Number of previous events to include for context.
             optimization_config: Optimization settings dictionary.
+            optimization_config: Optimization settings dictionary.
             token_tracker: Shared token usage tracker.
+            turbo: Enable turbo mode (disable profiling & novelty detection).
         """
+        self.turbo = turbo
         self.llm_client = llm_client
         self.context_size = context_size
         # Limit history to 50 events to prevent memory growth
@@ -63,12 +67,20 @@ class EventAnalyzer:
             patterns = opt_config.get('severity_patterns') or get_default_patterns()
             self.pattern_matcher = SeverityPatternMatcher(patterns)
         
-        # Initialize log profiler
-        self.profiler = LogProfiler(sample_limit=opt_config.get('profiler_limit', 50))
+        # Initialize log profiler (disabled in turbo mode)
+        self.profiler = None
+        if not self.turbo:
+            self.profiler = LogProfiler(sample_limit=opt_config.get('profiler_limit', 50))
         
-        # Initialize anomaly detector
-        anomaly_config = config.get_anomaly_detection_config() if hasattr(config, 'get_anomaly_detection_config') else {}
-        self.anomaly_detector = AnomalyDetector(config=anomaly_config)
+        # Initialize anomaly detector (disabled in turbo mode)
+        # Note: 'config' object is not available here, so we use default empty config
+        # The calling code (MonitorManager) should pass specific config if needed, 
+        # but for now we follow existing pattern but fix the NameError
+        self.anomaly_detector = None
+        if not self.turbo:
+             # Use empty config or pass it down if we change signature. 
+             # For now, safely handle the missing config object
+            self.anomaly_detector = AnomalyDetector(config={})
         
         # Token usage tracking
         self.token_tracker = token_tracker or TokenUsageTracker()
@@ -94,9 +106,13 @@ class EventAnalyzer:
         Returns:
             Analysis result.
         """
-        # 0. Background Profiling & Anomaly Detection
-        self.profiler.add_sample(event.content)
-        anomaly_results = self.anomaly_detector.add_event(event.content)
+        # 0. Background Profiling & Anomaly Detection (Skip in Turbo Mode)
+        anomaly_results = {}
+        if not self.turbo:
+            if self.profiler:
+                self.profiler.add_sample(event.content)
+            if self.anomaly_detector:
+                anomaly_results = self.anomaly_detector.add_event(event.content)
         
         # Collect spike anomalies
         for anomaly in anomaly_results.get("anomalies", []):

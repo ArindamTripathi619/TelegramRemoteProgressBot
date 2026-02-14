@@ -20,7 +20,7 @@ logger = get_logger("manager")
 class MonitorManager:
     """Manages all monitors and orchestrates the monitoring loop."""
     
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, turbo: bool = False):
         """Initialize manager.
         
         Args:
@@ -47,7 +47,8 @@ class MonitorManager:
         self.analyzer = EventAnalyzer(
             self.llm_client, 
             optimization_config=optimization_config,
-            token_tracker=self.token_tracker
+            token_tracker=self.token_tracker,
+            turbo=turbo
         )
         logger.info("LLM optimizations enabled (cache, patterns, context trimming)")
         
