@@ -12,6 +12,9 @@ from .config import Config, ConfigError, create_example_config
 from .monitors import FileMonitor, PIDMonitor, JournalMonitor, BaseMonitor
 from .analyzers import create_llm_client, EventAnalyzer
 from .notifiers import TelegramNotifier
+from .core.logging import get_logger
+
+logger = get_logger("manager")
 
 
 class MonitorManager:
@@ -46,7 +49,7 @@ class MonitorManager:
             optimization_config=optimization_config,
             token_tracker=self.token_tracker
         )
-        print(f"✓ LLM optimizations enabled (cache, patterns, context trimming)")
+        logger.info("LLM optimizations enabled (cache, patterns, context trimming)")
         
         telegram_config = config.get_telegram_config()
         notification_config = config.get_notification_config()
@@ -87,9 +90,9 @@ class MonitorManager:
                 avg_duration = self.history_manager.get_average_duration(process_config['name'])
                 if avg_duration > 0:
                     self.progress_tracker.expected_duration = avg_duration / 60  # minutes
-                    print(f"✓ Using historical average duration: {self.progress_tracker.expected_duration:.1f}m")
+                    logger.info(f"Using historical average duration: {self.progress_tracker.expected_duration:.1f}m")
             
-            print(f"✓ Progress tracking enabled for: {process_config['name']}")
+            logger.info(f"Progress tracking enabled for: {process_config['name']}")
         
         # Initialize message listener if interactive features enabled
         if interactive_config["listen_for_messages"]:
@@ -99,7 +102,7 @@ class MonitorManager:
             )
             # Set callback for status reports
             self.message_listener.set_message_callback(self._handle_user_message)
-            print("✓ Telegram message listening enabled")
+            logger.info("Telegram message listening enabled")
         
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -111,7 +114,7 @@ class MonitorManager:
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
-        print("\nShutting down gracefully...")
+        logger.info(f"Shutdown signal received ({signum})")
         self.stop()
         sys.exit(0)
     
@@ -146,10 +149,10 @@ class MonitorManager:
                     continue
                 
                 self.monitors.append(monitor)
-                print(f"✓ Configured {mon_type} monitor: {name}")
+                logger.info(f"Configured {mon_type} monitor: {name}")
             
             except Exception as e:
-                print(f"✗ Failed to setup {mon_type} monitor '{name}': {e}")
+                logger.error(f"Failed to setup {mon_type} monitor '{name}': {e}")
     
     def start(self):
         """Start all monitors and main loop."""
@@ -157,15 +160,15 @@ class MonitorManager:
             print("No monitors configured!")
             return
         
-        print(f"\n🚀 Starting {len(self.monitors)} monitor(s)...")
+        logger.info(f"Starting {len(self.monitors)} monitor(s)...")
         
         # Start all monitors
         for monitor in self.monitors:
             try:
                 monitor.start()
-                print(f"  ▶ {monitor.name}")
+                logger.debug(f"  ▶ {monitor.name} started")
             except Exception as e:
-                print(f"  ✗ Failed to start {monitor.name}: {e}")
+                logger.error(f"Failed to start {monitor.name}: {e}")
         
         self.running = True
         print("\n✓ Monitoring active. Press Ctrl+C to stop.\n")
@@ -207,16 +210,16 @@ class MonitorManager:
                         
                         # Handle main analysis
                         if self.notifier.send_analysis(analysis):
-                            print(f"📤 Sent: {analysis.summary}")
+                            logger.info(f"Analysis sent: {analysis.summary}")
                         
                         # Handle any side anomalies (e.g. spikes)
                         while getattr(self.analyzer, 'pending_anomalies', []):
                             side_analysis = self.analyzer.pending_anomalies.pop(0)
                             if self.notifier.send_analysis(side_analysis):
-                                print(f"📤 Sent side-analysis: {side_analysis.summary}")
+                                logger.info(f"Side-analysis sent: {side_analysis.summary}")
                     
                     except Exception as e:
-                        print(f"Error processing event: {e}")
+                        logger.error(f"Error processing event: {e}")
             
             # Periodic behavioral metrics and stall tracking
             if (current_time - last_progress_check) >= progress_check_interval:
@@ -244,10 +247,10 @@ class MonitorManager:
                     stall_analysis = self.analyzer.check_stall()
                     if stall_analysis:
                         self.notifier.send_analysis(stall_analysis)
-                        print(f"⚠️  {stall_analysis.summary} alert sent")
+                        logger.warning(f"Stall alert sent: {stall_analysis.summary}")
                 
                 except Exception as e:
-                    print(f"Periodic check error: {e}")
+                    logger.error(f"Periodic check error: {e}")
             
             # Poll for user messages
             if self.message_listener:
@@ -299,7 +302,7 @@ class MonitorManager:
         """Handle progress tracker specifically stalled."""
         stall_msg = f"⚠️ **Warning:** {self.progress_tracker.process_name} appears stalled at {self.progress_tracker.current_percentage:.1f}%"
         self.notifier.send_message(stall_msg)
-        print("⚠️  Progress stall alert sent")
+        logger.warning(f"Progress stall alert sent for {self.progress_tracker.process_name}")
 
     def _handle_user_message(self, text: str, is_command: bool = False, cmd: str = None, args: List[str] = None):
         """Handle incoming user message or command."""
@@ -310,18 +313,18 @@ class MonitorManager:
                 self._send_status_report()
             return
 
-        print(f"📩 Command received: /{cmd} {args}")
+        logger.info(f"Telegram command received: /{cmd} {args}")
         
         if cmd == "status":
             self._send_status_report()
         elif cmd == "pause":
             self.paused = True
             self.notifier.send_message("⏸️ **Monitoring Paused.** Monitors are still active but analysis is suspended.")
-            print("⏸️ Monitoring paused")
+            logger.info("Monitoring state changed to PAUSED")
         elif cmd == "resume":
             self.paused = False
             self.notifier.send_message("▶️ **Monitoring Resumed.**")
-            print("▶️ Monitoring resumed")
+            logger.info("Monitoring state changed to RUNNING")
         elif cmd == "logs":
             self._send_recent_logs()
         else:
@@ -354,12 +357,12 @@ class MonitorManager:
         """Stop all monitors."""
         self.running = False
         
-        print("Stopping monitors...")
+        logger.info("Stopping monitors...")
         for monitor in self.monitors:
             try:
                 monitor.stop()
             except Exception as e:
-                print(f"Error stopping {monitor.name}: {e}")
+                logger.error(f"Error stopping {monitor.name}: {e}")
 
 
 def cmd_setup(args):

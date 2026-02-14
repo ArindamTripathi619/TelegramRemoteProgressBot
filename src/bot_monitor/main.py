@@ -12,6 +12,9 @@ from bot_monitor.cli import MonitorManager  # We will keep the manager logic but
 from bot_monitor.core.state import StateManager, BotState
 from bot_monitor.ui.wizard import SetupWizard
 from bot_monitor.ui.dashboard import Dashboard
+from bot_monitor.core.logging import setup_logger, get_logger
+
+logger = get_logger("main")
 
 app = typer.Typer(help="TeleWatch - Remote Process Sentinel")
 console = Console()
@@ -98,10 +101,28 @@ def _start_daemon(config_path: Path):
     # Child continues
     os.setsid()
     
+    # Second fork to prevent acquiring a TTY
+    pid = os.fork()
+    if pid > 0:
+        sys.exit(0)
+
+    # Change to root or config directory
+    os.chdir("/")
+    os.umask(0)
+    
     # Redirect standard file descriptors
+    # We close them first to ensure no leaks
     sys.stdin.close()
-    sys.stdout = open(state_manager.log_file, 'a+')
-    sys.stderr = open(state_manager.log_file, 'a+')
+    
+    # We'll use the proper log file from state_manager
+    log_file = state_manager.log_file
+    with open(log_file, 'a+') as f:
+        os.dup2(f.fileno(), sys.stdout.fileno())
+        os.dup2(f.fileno(), sys.stderr.fileno())
+    
+    # Initialize the logger for the daemon (to file ONLY)
+    setup_logger(log_file=log_file)
+    logger.info("TeleWatch daemonized successfully.")
     
     _run_monitor(config_path, daemon=True)
 
