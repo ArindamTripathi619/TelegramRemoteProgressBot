@@ -191,6 +191,7 @@ class Config:
             'include_timestamps': opt_config.get('include_timestamps', False),
             'use_local_patterns': opt_config.get('use_local_patterns', True),
             'skip_llm_for_info': opt_config.get('skip_llm_for_info', True),
+            'profiler_limit': opt_config.get('profiler_limit', 50),
             'severity_patterns': self.get_severity_patterns()
         }
     

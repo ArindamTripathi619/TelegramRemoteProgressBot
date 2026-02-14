@@ -43,6 +43,7 @@ class EventAnalyzer:
         from .pattern_matcher import SeverityPatternMatcher, get_default_patterns
         from .token_tracker import TokenUsageTracker
         from .context_optimizer import trim_context, estimate_tokens, strip_timestamp
+        from .log_profiler import LogProfiler
         
         opt_config = optimization_config or {}
         
@@ -59,6 +60,9 @@ class EventAnalyzer:
         if opt_config.get('use_local_patterns', True):
             patterns = opt_config.get('severity_patterns') or get_default_patterns()
             self.pattern_matcher = SeverityPatternMatcher(patterns)
+        
+        # Initialize log profiler
+        self.profiler = LogProfiler(sample_limit=opt_config.get('profiler_limit', 50))
         
         # Token usage tracking
         self.token_tracker = token_tracker or TokenUsageTracker()
@@ -82,6 +86,9 @@ class EventAnalyzer:
         Returns:
             Analysis result.
         """
+        # 0. Background Profiling
+        self.profiler.add_sample(event.content)
+        
         # 1. Check cache first
         if self.cache:
             cached = self.cache.get(event)
@@ -214,6 +221,7 @@ class EventAnalyzer:
 2. Identify the root cause if it's an error
 3. Suggest a specific action to take
 4. Provide a one-line summary
+5. BOOTSTRAP MODE: If this is a new type of error, generate a single regex pattern that would match this error and similar ones in the future (avoiding too specific values like timestamps or unique IDs).
 
 **Recent Context (previous events):**
 """
@@ -236,7 +244,8 @@ Content:
   "severity": "CRITICAL|WARNING|INFO",
   "summary": "One-line description",
   "root_cause": "What caused this (if error)",
-  "suggested_action": "What to do next"
+  "suggested_action": "What to do next",
+  "recommended_regex": "A regex string to match this type of event locally"
 }}
 
 Respond ONLY with valid JSON.
@@ -277,13 +286,20 @@ Respond ONLY with valid JSON.
             }
             severity = severity_map.get(data.get("severity", "INFO").upper(), Severity.INFO)
             
-            return Analysis(
+            analysis = Analysis(
                 severity=severity,
                 summary=data.get("summary", "Event detected")[:200],
                 root_cause=data.get("root_cause", "Unknown")[:300],
                 suggested_action=data.get("suggested_action", "Monitor")[:300],
                 original_event=event
             )
+            
+            # 5. Inject Recommended Regex if provided
+            regex = data.get("recommended_regex")
+            if regex and self.pattern_matcher:
+                self.pattern_matcher.add_dynamic_pattern(regex, severity)
+                
+            return analysis
         
         except (json.JSONDecodeError, KeyError, ValueError):
             # Fallback parsing if JSON fails
@@ -311,6 +327,15 @@ Respond ONLY with valid JSON.
             cache_stats = self.cache.get_stats()
             stats['cache_stats'] = cache_stats
         
+        # Add profiler progress
+        if hasattr(self, 'profiler'):
+            stats['profiler_progress'] = len(self.profiler.samples) / self.profiler.sample_limit
+            
+        # Add dynamic patterns count
+        if self.pattern_matcher:
+            dynamic_count = sum(len(p) for p in self.pattern_matcher.dynamic_patterns.values())
+            stats['dynamic_patterns'] = dynamic_count
+            
         return stats
     
     def get_stats_summary(self, period: str = "current") -> str:

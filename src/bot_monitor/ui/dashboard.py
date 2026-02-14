@@ -27,36 +27,55 @@ class Dashboard:
             Layout(name="right", ratio=1)
         )
         
-    def generate_header(self, process_name: str, status: str):
+    def generate_header(self, process_name: str, status: str, profiler_progress: float = 0.0):
         """Generate the header panel."""
         status_color = "green" if status == "running" else "red"
         
+        # If profiling is active (e.g., < 100% and we are in learning phase)
+        # For simplicity, we'll use a special status if profiling
+        status_text = status.upper()
+        if 0 < profiler_progress < 1.0:
+            status_text = f"PROFILING {int(profiler_progress * 100)}%"
+            status_color = "yellow"
+
         grid = Table.grid(expand=True)
         grid.add_column(justify="left", ratio=1)
         grid.add_column(justify="right")
         grid.add_row(
             f"[b cyan]{self.title}[/b cyan] | Monitoring: [b white]{process_name}[/b white]",
-            f"Status: [{status_color}]{status.upper()}[/{status_color}] | {datetime.now().strftime('%H:%M:%S')}"
+            f"Status: [{status_color}]{status_text}[/{status_color}] | {datetime.now().strftime('%H:%M:%S')}"
         )
         return Panel(grid, style="blue")
 
-    def generate_progress(self, progress: float, message: str):
+    def generate_progress(self, progress: float, message: str, profiler_progress: float = 0.0):
         """Generate the main progress display."""
         # This is a static rendering for layout; actual progress bar needs rich.Progress integration
         # For layout purposes, creating a visual representation
         
-        completed = int(progress / 2)  # 50 chars width
-        bar = "█" * completed + "░" * (50 - completed)
+        is_profiling = 0 < profiler_progress < 1.0
+        
+        if is_profiling:
+            completed = int(profiler_progress * 50)
+            bar = "█" * completed + "░" * (50 - completed)
+            main_msg = "LEARNING LOG STRUCTURE..."
+            pct = profiler_progress * 100
+            bar_color = "yellow"
+        else:
+            completed = int(progress / 2)  # 50 chars width
+            bar = "█" * completed + "░" * (50 - completed)
+            main_msg = message
+            pct = progress
+            bar_color = "cyan"
         
         text = Text()
-        text.append(f"\n{message}\n\n", style="bold white")
-        text.append(f"{bar} ", style="cyan")
-        text.append(f"{progress:.1f}%\n", style="bold green")
+        text.append(f"\n{main_msg}\n\n", style="bold white")
+        text.append(f"{bar} ", style=bar_color)
+        text.append(f"{pct:.1f}%\n", style="bold green")
         
         return Panel(
             Align.center(text),
-            title="Current Progress",
-            border_style="green"
+            title="Monitoring Status" if not is_profiling else "Initialization",
+            border_style="green" if not is_profiling else "yellow"
         )
         
     def generate_stats(self, token_stats: dict):
@@ -81,7 +100,7 @@ class Dashboard:
         table.add_row("🧠 LLM Calls", str(token_stats.get("llm_calls", 0)))
         table.add_row("🎟️  Tokens", str(token_stats.get("total_tokens", 0)))
         table.add_row("💾 Cache Hits", f"{token_stats.get('cached_calls', 0)} ({token_stats.get('cache_hit_rate', 0)}%)")
-        table.add_row("🎯 Patterns", str(token_stats.get("pattern_matched", 0)))
+        table.add_row("🎯 Patterns", f"{token_stats.get('pattern_matched', 0)} (+{token_stats.get('dynamic_patterns', 0)} dynamic)")
         
         return Panel(
             table,
@@ -111,10 +130,13 @@ class Dashboard:
 
     def render(self, state, token_stats, recent_logs):
         """Update the entire layout."""
-        self.layout["header"].update(self.generate_header(state.process_name, state.status))
-        self.layout["left"].update(self.generate_progress(state.progress, state.message))
+        # Calculate profiler progress
+        # Assuming state might have profiler_progress or we pass it via token_stats for now
+        profiler_progress = token_stats.get("profiler_progress", 0.0)
+        
+        self.layout["header"].update(self.generate_header(state.process_name, state.status, profiler_progress))
+        self.layout["left"].update(self.generate_progress(state.progress, state.message, profiler_progress))
         self.layout["right"].update(self.generate_stats(token_stats)) 
-        # self.layout["main"]["bottom"].update(self.generate_logs(recent_logs)) # If we split left further
         self.layout["footer"].update(self.generate_footer())
         
         return self.layout
