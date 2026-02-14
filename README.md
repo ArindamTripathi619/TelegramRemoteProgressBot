@@ -14,6 +14,9 @@ Monitor long-running processes on remote servers, get intelligent alerts when th
 - 🧬 Structural novelty detection (detecting new error types)
 - 🧠 Historical duration learning (auto-estimates)
 
+🔗 **[Download Latest Release](https://github.com/ArindamTripathi619/TelegramRemoteProgressBot/releases/latest)**
+
+
 ✅ **Interactive Control**
 - 🕹️ Process status on demand (`/status`)
 - ⏸️ Pause/Resume monitoring remotely
@@ -355,7 +358,7 @@ Contributions welcome! Please feel free to submit pull requests.
 
 ## License
 
-MIT License - See LICENSE file for details
+MIT License - See [LICENSE](./LICENSE) file for details
 
 ## Support
 
