@@ -8,6 +8,13 @@ from rich.align import Align
 from rich.live import Live
 from datetime import datetime
 
+ASCII_ART = r"""
+[cyan]  _____ ___ _    _____      ___  _____ ___ _  _ [/cyan]
+[cyan] |_   _| __| |  | __\ \    / / ||_   _/ __| || |[/cyan]
+[cyan]   | | | _|| |__| _| \ \/\/ /| __ || || (__| __ |[/cyan]
+[cyan]   |_| |___|____|___| \_/\_/ |_||_||_| \___|_||_|[/cyan]
+"""
+
 class Dashboard:
     def __init__(self, title="TeleWatch Monitor"):
         self.console = Console()
@@ -18,21 +25,19 @@ class Dashboard:
     def setup_layout(self):
         """Define the dashboard layout."""
         self.layout.split(
-            Layout(name="header", size=3),
+            Layout(name="header", size=7),
             Layout(name="main", ratio=1),
             Layout(name="footer", size=3)
         )
         self.layout["main"].split_row(
-            Layout(name="left", ratio=2),
+            Layout(name="left", ratio=3),
             Layout(name="right", ratio=1)
         )
         
     def generate_header(self, process_name: str, status: str, profiler_progress: float = 0.0):
-        """Generate the header panel."""
+        """Generate the header panel with ASCII art."""
         status_color = "green" if status == "running" else "red"
         
-        # If profiling is active (e.g., < 100% and we are in learning phase)
-        # For simplicity, we'll use a special status if profiling
         status_text = status.upper()
         if 0 < profiler_progress < 1.0:
             status_text = f"PROFILING {int(profiler_progress * 100)}%"
@@ -40,42 +45,49 @@ class Dashboard:
 
         grid = Table.grid(expand=True)
         grid.add_column(justify="left", ratio=1)
-        grid.add_column(justify="right")
+        grid.add_column(justify="right", ratio=1)
+        
+        # Right side: Status and Process
+        info_table = Table.grid(padding=(0, 1))
+        info_table.add_column(justify="right")
+        info_table.add_row(f"[b white]{process_name}[/b white]")
+        info_table.add_row(f"Status: [{status_color}][blink]{status_text}[/blink][/{status_color}]")
+        info_table.add_row(f"[dim]{datetime.now().strftime('%H:%M:%S')}[/dim]")
+
         grid.add_row(
-            f"[b cyan]{self.title}[/b cyan] | Monitoring: [b white]{process_name}[/b white]",
-            f"Status: [{status_color}]{status_text}[/{status_color}] | {datetime.now().strftime('%H:%M:%S')}"
+            Align.left(Text.from_markup(ASCII_ART.strip("\n")), vertical="middle"),
+            Align.right(info_table, vertical="middle")
         )
-        return Panel(grid, style="blue")
+        return Panel(grid, style="blue", padding=(1, 2))
 
     def generate_progress(self, progress: float, message: str, profiler_progress: float = 0.0):
-        """Generate the main progress display."""
-        # This is a static rendering for layout; actual progress bar needs rich.Progress integration
-        # For layout purposes, creating a visual representation
-        
+        """Generate the main progress display with high-quality bars."""
         is_profiling = 0 < profiler_progress < 1.0
         
+        progress_obj = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=None, pulse_style="yellow"),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            expand=True
+        )
+        
         if is_profiling:
-            completed = int(profiler_progress * 50)
-            bar = "█" * completed + "░" * (50 - completed)
-            main_msg = "LEARNING LOG STRUCTURE..."
-            pct = profiler_progress * 100
-            bar_color = "yellow"
+            task_id = progress_obj.add_task("[yellow]Learning Structure...", total=100)
+            progress_obj.update(task_id, completed=profiler_progress * 100)
+            title = "Initialization Phase"
+            border_style = "yellow"
         else:
-            completed = int(progress / 2)  # 50 chars width
-            bar = "█" * completed + "░" * (50 - completed)
-            main_msg = message
-            pct = progress
-            bar_color = "cyan"
-        
-        text = Text()
-        text.append(f"\n{main_msg}\n\n", style="bold white")
-        text.append(f"{bar} ", style=bar_color)
-        text.append(f"{pct:.1f}%\n", style="bold green")
-        
+            task_id = progress_obj.add_task(f"[white]{message}", total=100)
+            progress_obj.update(task_id, completed=progress)
+            title = "Live Monitoring"
+            border_style = "cyan"
+            
         return Panel(
-            Align.center(text),
-            title="Monitoring Status" if not is_profiling else "Initialization",
-            border_style="green" if not is_profiling else "yellow"
+            progress_obj,
+            title=title,
+            border_style=border_style,
+            padding=(1, 2)
         )
         
     def generate_stats(self, token_stats: dict):
@@ -108,9 +120,10 @@ class Dashboard:
         table.add_row("🔍 Structures", str(anomaly_stats.get("known_structures", 0)))
         
         return Panel(
-            table,
+            Align.center(table, vertical="middle"),
             title="Statistics",
-            border_style="yellow"
+            border_style="yellow",
+            padding=(1, 1)
         )
         
     def generate_logs(self, recent_logs: list):
