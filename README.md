@@ -4,6 +4,8 @@
 
 Monitor long-running processes on remote servers, get intelligent alerts when things go wrong. Perfect for ML training jobs, batch processing, deployments, or any long-running tasks where you need real-time failure notifications.
 
+![TeleWatch TUI Dashboard](./tui_screenshot.webp)
+
 ## Features
 
 ✅ **Behavioral Sentinels**
@@ -32,6 +34,8 @@ Run the interactive setup wizard - it will guide you through everything:
 ```bash
 bot-monitor setup
 ```
+
+📘 **New to TeleWatch?** Check out our detailed [Onboarding Guide](./ONBOARDING.md) for a step-by-step walkthrough, including Daemon background execution and Turbo mode for edge devices.
 
 **The wizard will:**
 1. ✅ Collect and validate Telegram credentials (sends test message!)
