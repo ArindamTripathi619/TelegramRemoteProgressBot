@@ -49,6 +49,8 @@ def start(
     if daemon:
         _start_daemon(config)
     else:
+        # Initialize logger for foreground (TUI) - suppress console output
+        setup_logger(log_file=state_manager.log_file, suppress_console=True)
         _run_monitor(config, daemon=False)
 
 @app.command()
@@ -163,7 +165,9 @@ def _run_monitor(config_path: Path, daemon: bool):
                         current_state = state_manager.load_state()
                         # Get token stats if available
                         t_stats = manager.analyzer.get_token_stats() if hasattr(manager, 'analyzer') else {}
-                        live.update(dashboard.render(current_state, t_stats, []))
+                        # Get live logs from tracker
+                        recent_logs = manager.progress_tracker.recent_logs if manager.progress_tracker else []
+                        live.update(dashboard.render(current_state, t_stats, recent_logs))
                 
                 # Inject callback (we need to modify MonitorManager to support this or wrapper)
                 # For this implementation plan, we assume MonitorManager is robust enough or we wrap it.

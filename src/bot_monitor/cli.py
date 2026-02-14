@@ -171,7 +171,7 @@ class MonitorManager:
                 logger.error(f"Failed to start {monitor.name}: {e}")
         
         self.running = True
-        print("\n✓ Monitoring active. Press Ctrl+C to stop.\n")
+        logger.info("Monitoring active. Press Ctrl+C to stop.")
         
         # Main event loop
         self._event_loop()
@@ -181,6 +181,10 @@ class MonitorManager:
         import time
         last_progress_check = time.time()
         progress_check_interval = 2  # Check progress every 2 seconds
+        
+        # Initial UI update
+        if self.ui_callback:
+            self.ui_callback(0.0, "Starting monitors...")
         
         while self.running:
             if self.paused:

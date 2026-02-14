@@ -9,10 +9,11 @@ from rich.live import Live
 from datetime import datetime
 
 ASCII_ART = r"""
-[cyan]  _____ ___ _    _____      ___  _____ ___ _  _ [/cyan]
-[cyan] |_   _| __| |  | __\ \    / / ||_   _/ __| || |[/cyan]
-[cyan]   | | | _|| |__| _| \ \/\/ /| __ || || (__| __ |[/cyan]
-[cyan]   |_| |___|____|___| \_/\_/ |_||_||_| \___|_||_|[/cyan]
+[cyan]  ______     __   _       __      __       __  
+ /_  __/__  / /__| |     / /___ _/ /______/ /_ 
+  / / / _ \/ / _ \ | /| / / __ `/ __/ ___/ __ \
+ / / /  __/ /  __/ |/ |/ / /_/ / /_/ /__/ / / /
+/_/  \___/_/\___/|__/|__/\__,_/\__/\___/_/ /_/ [/cyan]
 """
 
 class Dashboard:
@@ -25,7 +26,7 @@ class Dashboard:
     def setup_layout(self):
         """Define the dashboard layout."""
         self.layout.split(
-            Layout(name="header", size=7),
+            Layout(name="header", size=10),
             Layout(name="main", ratio=1),
             Layout(name="footer", size=3)
         )
@@ -51,8 +52,9 @@ class Dashboard:
         info_table = Table.grid(padding=(0, 1))
         info_table.add_column(justify="right")
         info_table.add_row(f"[b white]{process_name}[/b white]")
-        info_table.add_row(f"Status: [{status_color}][blink]{status_text}[/blink][/{status_color}]")
-        info_table.add_row(f"[dim]{datetime.now().strftime('%H:%M:%S')}[/dim]")
+        info_table.add_row(
+            f"[{status_color}][blink]●[/blink] {status_text}[/{status_color}]  [dim]• {datetime.now().strftime('%H:%M:%S')}[/dim]"
+        )
 
         grid.add_row(
             Align.left(Text.from_markup(ASCII_ART.strip("\n")), vertical="middle"),
