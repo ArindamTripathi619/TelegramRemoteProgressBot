@@ -32,7 +32,8 @@ def setup():
 @app.command()
 def start(
     daemon: bool = typer.Option(False, "--daemon", "-d", help="Run in background mode"),
-    config: Path = typer.Option(None, "--config", "-c", help="Path to config file")
+    config: Path = typer.Option(None, "--config", "-c", help="Path to config file"),
+    turbo: bool = typer.Option(False, "--turbo", help="Ultra-lean mode: disable profiling & novelty detection")
 ):
     """Start the monitoring process."""
     if not config:
@@ -47,11 +48,11 @@ def start(
         raise typer.Exit(1)
 
     if daemon:
-        _start_daemon(config)
+        _start_daemon(config, turbo=turbo)
     else:
         # Initialize logger for foreground (TUI) - suppress console output
         setup_logger(log_file=state_manager.log_file, suppress_console=True)
-        _run_monitor(config, daemon=False)
+        _run_monitor(config, daemon=False, turbo=turbo)
 
 @app.command()
 def status():

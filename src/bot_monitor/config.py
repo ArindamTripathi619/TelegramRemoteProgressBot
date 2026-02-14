@@ -54,6 +54,21 @@ class Config:
             path: Path to config file.
         """
         self.config_path = path
+        
+        # Check file permissions for security
+        import stat
+        file_stat = path.stat()
+        file_mode = stat.S_IMODE(file_stat.st_mode)
+        
+        # Warn if file has group or other read permissions
+        if file_mode & (stat.S_IRGRP | stat.S_IROTH):
+            import warnings
+            warnings.warn(
+                f"Config file {path} has overly permissive permissions ({oct(file_mode)}). "
+                f"Recommended: chmod 600 {path}",
+                UserWarning
+            )
+        
         with open(path, "r") as f:
             raw_data = yaml.safe_load(f)
         
@@ -208,6 +223,19 @@ class Config:
             return None
         
         return patterns
+    
+    def get_anomaly_detection_config(self) -> Dict[str, Any]:
+        """Get anomaly detection configuration with defaults.
+        
+        Returns:
+            Anomaly detection config dict.
+        """
+        defaults = {
+            'spike_threshold': 3.0,
+            'stall_seconds': 300,
+            'novelty_threshold': 0.8
+        }
+        return {**defaults, **self.data.get('anomaly_detection', {})}
 
 
 def create_example_config(output_path: Path):
@@ -239,6 +267,14 @@ notification:
   rate_limit_per_hour: 10
   # Which severity levels to send
   severity_levels: [critical, warning, info]
+
+anomaly_detection:
+  # Multiplier for spike detection (3.0 = 300% increase)
+  spike_threshold: 3.0
+  # Time without logs to trigger stall alert (seconds)
+  stall_seconds: 300
+  # Threshold for novelty detection (0.8 = 80% confidence)
+  novelty_threshold: 0.8
 
 monitors:
   # Monitor a log file

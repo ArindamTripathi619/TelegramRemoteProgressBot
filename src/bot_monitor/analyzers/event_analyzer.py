@@ -67,9 +67,8 @@ class EventAnalyzer:
         self.profiler = LogProfiler(sample_limit=opt_config.get('profiler_limit', 50))
         
         # Initialize anomaly detector
-        self.anomaly_detector = AnomalyDetector(
-            stall_seconds=opt_config.get('stall_seconds', 300)
-        )
+        anomaly_config = config.get_anomaly_detection_config() if hasattr(config, 'get_anomaly_detection_config') else {}
+        self.anomaly_detector = AnomalyDetector(config=anomaly_config)
         
         # Token usage tracking
         self.token_tracker = token_tracker or TokenUsageTracker()

@@ -18,9 +18,20 @@ class BaseLLMClient(ABC):
         """Analyze with LLM."""
         pass
 
-    def _handle_error(self, provider: str, e: Exception):
-        """Standardized error handling for all providers."""
+    def _handle_error(self, provider: str, e: Exception, endpoint: str = None):
+        """Standardized error handling for all providers.
+        
+        Args:
+            provider: Provider name for error messages
+            e: The exception that was raised
+            endpoint: Optional endpoint URL for connection errors
+        """
         error_msg = str(e).lower()
+        
+        # Detect connection issues
+        if any(word in error_msg for word in ["connection", "timeout", "unreachable", "refused"]):
+            location = f" at {endpoint}" if endpoint else ""
+            raise LLMError(f"CONNECTION_ERROR: {provider} server not reachable{location}. {e}")
         
         # Detect quota/billing issues
         if any(word in error_msg for word in ["quota", "rate limit", "insufficient", "billing", "credits", "429"]):
@@ -142,10 +153,7 @@ class OllamaClient(BaseLLMClient):
             response.raise_for_status()
             return response.json()["message"]["content"]
         except Exception as e:
-            error_msg = str(e).lower()
-            if "connection" in error_msg or "timeout" in error_msg:
-                raise LLMError(f"CONNECTION_ERROR: Ollama server not reachable at {self.base_url}")
-            self._handle_error("Ollama", e)
+            self._handle_error("Ollama", e, endpoint=self.base_url)
 
 
 def create_llm_client(config: Dict[str, Any]) -> BaseLLMClient:

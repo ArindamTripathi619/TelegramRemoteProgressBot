@@ -7,10 +7,27 @@ from collections import deque
 class AnomalyDetector:
     """Detects temporal and structural anomalies in log streams."""
     
-    def __init__(self, window_size_seconds: int = 60, spike_threshold: float = 3.0, stall_seconds: int = 300):
+    def __init__(self, window_size_seconds: int = 60, spike_threshold: float = 3.0, 
+                 stall_seconds: int = 300, config: Optional[Dict[str, Any]] = None):
+        """Initialize anomaly detector.
+        
+        Args:
+            window_size_seconds: Time window for frequency calculations
+            spike_threshold: Multiplier for spike detection (default 3.0)
+            stall_seconds: Time without logs to trigger stall alert (default 300)
+            config: Optional config dict to override defaults
+        """
+        # If config provided, use those values
+        if config:
+            self.spike_threshold = config.get('spike_threshold', spike_threshold)
+            self.stall_seconds = config.get('stall_seconds', stall_seconds)
+            self.novelty_threshold = config.get('novelty_threshold', 0.8)
+        else:
+            self.spike_threshold = spike_threshold
+            self.stall_seconds = stall_seconds
+            self.novelty_threshold = 0.8
+        
         self.window_size = window_size_seconds
-        self.spike_threshold = spike_threshold
-        self.stall_seconds = stall_seconds
         
         # Frequency tracking
         self.log_timestamps = deque()
