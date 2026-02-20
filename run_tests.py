@@ -10,6 +10,9 @@ sys.modules["watchdog.events"] = MagicMock()
 sys.modules["requests"] = MagicMock()
 sys.modules["telegram"] = MagicMock()
 sys.modules["telegram.error"] = MagicMock()
+sys.modules["openai"] = MagicMock()
+sys.modules["openai.resources"] = MagicMock()
+sys.modules["openai.resources.chat"] = MagicMock()
 
 # Mock specific imports that might be used
 mock_observer = MagicMock()

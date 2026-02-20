@@ -245,6 +245,12 @@ monitors:
 3. Configure provider: `ollama` with model `llama3.2`
 4. No API key needed!
 
+### 3. LLM Configuration
+TeleWatch supports highly resilient analysis:
+- **Local API Rotator**: Point to a local LiteLLM proxy for cost-effective, rotated API usage.
+- **Ollama**: 100% private, local analysis.
+- **Cloud Providers**: Groq (Fast), OpenAI, Anthropic.
+
 ## Environment Variables
 
 Use environment variables for sensitive data:

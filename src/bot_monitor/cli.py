@@ -437,22 +437,24 @@ def cmd_setup(args):
     print("  2) Anthropic (High quality, ~$0.25/1M tokens)")
     print("  3) Groq (FREE tier, fast)")
     print("  4) Ollama (Local, private, FREE)")
+    print("  5) Local API Rotator (LiteLLM Proxy - Resilient & Rotated)")
     print()
     
-    provider_map = {"1": "openai", "2": "anthropic", "3": "groq", "4": "ollama"}
+    provider_map = {"1": "openai", "2": "anthropic", "3": "groq", "4": "ollama", "5": "local-rotator"}
     model_map = {
         "openai": "gpt-4o-mini",
         "anthropic": "claude-3-5-haiku-20241022",
         "groq": "llama-3.3-70b-versatile",
-        "ollama": "llama3.2"
+        "ollama": "llama3.2",
+        "local-rotator": "groq-llama"
     }
     
     while True:
-        choice = input("Choice [1-4]: ").strip()
+        choice = input("Choice [1-5]: ").strip()
         provider = provider_map.get(choice)
         if provider:
             break
-        print("❌ Invalid choice. Please enter 1, 2, 3, or 4")
+        print("❌ Invalid choice. Please enter 1, 2, 3, 4, or 5")
     
     config_data["llm"]["provider"] = provider
     config_data["llm"]["model"] = model_map[provider]
@@ -483,6 +485,9 @@ def cmd_setup(args):
                     "api_key": api_key,
                     "model": config_data["llm"]["model"]
                 }
+                if provider == "local-rotator":
+                    test_config["base_url"] = config_data["llm"].get("base_url", "http://localhost:8000/v1")
+                
                 client = create_llm_client(test_config)
                 # Make a simple test call
                 response = client.analyze("Respond with 'OK' if you can read this.")
@@ -495,7 +500,30 @@ def cmd_setup(args):
                 if retry == 'n':
                     print("Setup cancelled.")
                     sys.exit(1)
-    else:
+    elif provider == "local-rotator":
+        print("\n[Local API Rotator Setup]")
+        base_url = input("Enter Local Rotator URL [http://localhost:8000/v1]: ").strip() or "http://localhost:8000/v1"
+        config_data["llm"]["base_url"] = base_url
+        
+        print("\nSelect Rotator Model:")
+        print("  1) groq-llama (Fast coding/chat)")
+        print("  2) gemini-flash (Long context/vision)")
+        print("  3) Custom model name")
+        rot_choice = input("Choice [1-3]: ").strip()
+        
+        if rot_choice == "1":
+            config_data["llm"]["model"] = "groq-llama"
+        elif rot_choice == "2":
+            config_data["llm"]["model"] = "gemini-flash"
+        else:
+            cust_model = input("Enter custom model name: ").strip()
+            if cust_model:
+                config_data["llm"]["model"] = cust_model
+
+        config_data["llm"]["api_key"] = "sk-local-rotator" # Default dummy key
+        print(f"\n✓ Local Rotator configured: {base_url}")
+        print(f"  Model: {config_data['llm']['model']}")
+    elif provider == "ollama":
         print("\n✓ Using Ollama (local)")
         config_data["llm"]["base_url"] = "http://localhost:11434"
         print(f"  Model: {config_data['llm']['model']}")

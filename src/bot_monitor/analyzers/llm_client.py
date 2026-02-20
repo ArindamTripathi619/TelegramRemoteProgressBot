@@ -47,14 +47,15 @@ class BaseLLMClient(ABC):
 class OpenAIClient(BaseLLMClient):
     """OpenAI client."""
     
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: Optional[str] = None):
         try:
             from openai import OpenAI
         except ImportError:
             raise LLMError("openai package not installed. Run: pip install openai")
         
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
+        self.base_url = base_url
     
     def analyze(self, prompt: str) -> str:
         try:
@@ -69,7 +70,7 @@ class OpenAIClient(BaseLLMClient):
             )
             return response.choices[0].message.content or ""
         except Exception as e:
-            self._handle_error("OpenAI", e)
+            self._handle_error("OpenAI", e, endpoint=self.base_url)
 
 
 class AnthropicClient(BaseLLMClient):
@@ -170,7 +171,15 @@ def create_llm_client(config: Dict[str, Any]) -> BaseLLMClient:
         cls, default_model = mapping[provider]
         return cls(
             api_key=config["api_key"],
-            model=config.get("model", default_model)
+            model=config.get("model", default_model),
+            base_url=config.get("base_url")
+        )
+    elif provider == "local-rotator":
+        # Use OpenAI client but pointed at local rotator
+        return OpenAIClient(
+            api_key=config.get("api_key", "sk-local-rotator"),
+            model=config.get("model", "groq-llama"),
+            base_url=config.get("base_url", "http://localhost:8000/v1")
         )
     elif provider == "ollama":
         return OllamaClient(

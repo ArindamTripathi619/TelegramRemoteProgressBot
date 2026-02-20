@@ -26,9 +26,9 @@ Before you start, ensure you have:
 *   **Chat ID**: Your personal ID, retrieved via [@userinfobot](https://t.me/userinfobot) (usually a 9-10 digit number).
 *   **LLM API Key** (Optional but Recommended):
     *   **Groq** (Fastest, Free Tier available) - *Recommended*
-    *   **OpenAI** (GPT-4o/mini)
-    *   **Anthropic** (Claude 3.5 Sonnet)
-    *   **Ollama** (Local/Offline)
+    *  - **Option 1-3**: Cloud providers (OpenAI, Anthropic, Groq). Requires an API Key.
+- **Option 4**: Ollama (Local). 100% private, runs on your hardware.
+- **Option 5**: Local API Rotator. Points to a LiteLLM proxy (standard on this laptop).
 
 ---
 
