@@ -157,6 +157,67 @@ telewatch start --foreground --debug
 - disables both services
 - removes both unit files from user systemd directory
 
+`telewatch workflows`:
+
+- manages recurring automation definitions stored in `~/.config/telewatch/workflows.json`
+- `init` writes a sample daily news workflow
+- `list` shows workflow status, schedule, and next run time
+- `status --id <workflow>` shows persisted state for one workflow
+- `validate` checks the workflow file for schema and syntax errors
+- `run --id <workflow>` executes one workflow immediately using the configured bot and OpenCode bridge
+- `pause --id <workflow>` and `resume --id <workflow>` control scheduler execution without editing definitions
+
+Workflow definitions are JSON-based so the app can load, validate, and execute them without extra dependencies.
+Supported schedules include `daily@HH:MM`, `every:<seconds>` / `interval:<seconds>`, and cron-style expressions (`cron:*/15 * * * *`).
+The `http_fetch` step now supports RSS/Atom normalization for news workflows via `normalize: "rss_digest"` (or `auto`).
+
+Phase-1 execution model for Google Workspace workflows:
+
+- use `opencode_prompt` + `telegram_send` to ship quickly
+- instruct OpenCode in the prompt to use the desired MCP profile internally (for example `gws-arindam` or `gws-kiit`)
+- keep scheduler/state/retries in TeleWatch
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor User as Telegram User
+  participant Bot as TeleWatch Bot
+  participant OC as OpenCode API
+  participant WF as workflows.json
+
+  User->>Bot: /workflow create <natural language>
+  Bot->>OC: Draft workflow JSON from template
+  OC-->>Bot: Candidate workflow JSON
+  Bot->>Bot: Validate schema and schedule
+  Bot-->>User: Preview + next run + YES/RUN/EDIT/CANCEL
+  User-->>Bot: YES | RUN | EDIT ... | CANCEL
+  alt YES or RUN
+    Bot->>WF: Save/merge workflow by id
+  else EDIT
+    Bot->>OC: Revise existing draft with delta
+    OC-->>Bot: Updated workflow JSON
+    Bot-->>User: Updated preview
+  else CANCEL
+    Bot-->>User: Draft discarded
+  end
+```
+
+```mermaid
+flowchart LR
+  A[Scheduler tick] --> B[Load workflows.json]
+  B --> C{Workflow due and not paused}
+  C -- no --> D[Skip]
+  C -- yes --> E[Execute steps]
+  E --> F[opencode_prompt: call MCP internally by profile name]
+  F --> G[telegram_send]
+  G --> H[Persist run state]
+```
+
+Template examples:
+
+- [config/workflows.example.json](config/workflows.example.json)
+- [config/workflow-templates/personal-gmail-digest.opencode-internal-mcp.json](config/workflow-templates/personal-gmail-digest.opencode-internal-mcp.json)
+
 ## Setup Wizard
 
 `telewatch setup` writes `~/.config/telewatch/bridge.env` and configures:
@@ -244,7 +305,18 @@ Available Telegram commands:
 /help
 /health
 /stats
+/workflow create <natural language request>
 ```
+
+`/workflow` also supports `list`, `status <id>`, `pause <id>`, `resume <id>`, and `run <id>`.
+For `create`, the bot generates a draft workflow JSON, sends a preview, and waits for one of:
+
+- `YES` (save)
+- `RUN` (save and run now)
+- `EDIT <changes>` (revise draft)
+- `CANCEL` (discard)
+
+The bot keeps pending drafts in memory per chat and reports draft count in `/stats`.
 
 No direct `!gws`/`/gws` execution path exists in this architecture. Google Workspace actions should run through MCP tools configured in your OpenCode server.
 

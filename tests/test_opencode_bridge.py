@@ -1,7 +1,10 @@
 import asyncio
+import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -59,7 +62,7 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
             decorator_base_url="https://example.test/v1",
         )
         bridge = OpenCodeBridge(config)
-        bridge._decorate_output_sync = lambda raw: {
+        bridge._decorate_output_sync = lambda raw_output: {
             "title": "Summary",
             "summary": "Short decorated summary.",
             "highlights": ["First highlight"],
@@ -70,6 +73,7 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
         messages = asyncio.run(bridge.decorate_output("raw output"))
 
         self.assertIsNotNone(messages)
+        assert messages is not None
         self.assertTrue(any("Summary" in message for message in messages))
         self.assertTrue(any("Highlights" in message for message in messages))
         self.assertTrue(any("Actions" in message for message in messages))
@@ -90,7 +94,7 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
             input_llm_litellm_port=8000,
         )
         bridge = OpenCodeBridge(config)
-        bridge._enhance_prompt_sync = lambda runtime, raw: "Refined prompt for OpenCode"
+        bridge._enhance_prompt_sync = lambda runtime, raw_prompt: "Refined prompt for OpenCode"
 
         enhanced = asyncio.run(bridge.enhance_prompt("raw user message"))
 
@@ -112,7 +116,7 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
         )
         bridge = OpenCodeBridge(config)
 
-        def _boom(runtime, raw):
+        def _boom(runtime, raw_prompt):
             raise RuntimeError("failed")
 
         bridge._enhance_prompt_sync = _boom
@@ -153,8 +157,23 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
 
         result = asyncio.run(bridge.run_prompt(123, "hello"))
 
-        self.assertIn("OpenCode API request failed", result)
+        self.assertIn("Check logs for details", result)
         self.assertEqual(bridge._stats["failed_requests"], 1)
+
+    def test_allow_all_chats_is_explicit(self):
+        config = BridgeConfig.from_mapping(
+            {
+                "TELEGRAM_BOT_TOKEN": "123:token",
+                "OPENCODE_MODEL": "opencode/big-pickle",
+                "OPENCODE_WORKING_DIR": ".",
+                "OPENCODE_TIMEOUT_SECONDS": "10",
+                "OPENCODE_MAX_CONCURRENT": "1",
+                "TELEGRAM_ALLOW_ALL_CHATS": "1",
+            }
+        )
+        bridge = OpenCodeBridge(config)
+
+        self.assertTrue(bridge._is_chat_allowed(999999))
 
     def test_send_session_message_prefers_parts_payload(self):
         config = BridgeConfig(
@@ -195,6 +214,76 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
 
         candidates = _extract_text_candidates(payload)
         self.assertIn("Hello from assistant", candidates)
+
+    def test_extract_json_object_text_from_fenced_output(self):
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids=set(),
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        text = """```json
+        {"id":"daily_digest","schedule":"daily@06:55","steps":[{"type":"telegram_send"}]}
+        ```"""
+        extracted = bridge._extract_json_object_text(text)
+
+        self.assertIsNotNone(extracted)
+        parsed = json.loads(str(extracted))
+        self.assertEqual(parsed["id"], "daily_digest")
+
+    def test_pending_workflow_reply_yes_saves_workflow_file(self):
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids=set(),
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        chat_id = 123
+        bridge._pending_workflow_drafts[chat_id] = {
+            "workflow": {
+                "id": "daily_digest",
+                "name": "Daily Digest",
+                "enabled": True,
+                "timezone": "local",
+                "schedule": "daily@06:55",
+                "targets": [123],
+                "steps": [
+                    {"type": "transform_python", "mode": "identity"},
+                    {"type": "telegram_send"},
+                ],
+                "retry_policy": {},
+                "dedupe_policy": {},
+                "metadata": {},
+            }
+        }
+
+        class FakeApp:
+            bot = None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflow_file = Path(temp_dir) / "workflows.json"
+            original = OpenCodeBridge._workflow_file_path
+            OpenCodeBridge._workflow_file_path = staticmethod(lambda: workflow_file)
+            try:
+                reply = asyncio.run(bridge._handle_pending_workflow_reply(chat_id, "YES", FakeApp()))
+            finally:
+                OpenCodeBridge._workflow_file_path = original
+
+            self.assertIsNotNone(reply)
+            self.assertTrue(workflow_file.exists())
+            payload = json.loads(workflow_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["workflows"][0]["id"], "daily_digest")
+            self.assertNotIn(chat_id, bridge._pending_workflow_drafts)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,13 @@ from unittest.mock import Mock, patch, call
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.telewatch.app import _build_opencode_systemd_unit, _build_systemd_unit, read_env_file, write_env_file
+from src.telewatch.app import (
+    _build_opencode_systemd_unit,
+    _build_systemd_unit,
+    _merged_config,
+    read_env_file,
+    write_env_file,
+)
 from src.telewatch.opencode_bridge import BridgeConfig
 
 
@@ -73,7 +79,36 @@ class TestAppConfig(unittest.TestCase):
         self.assertEqual(config.opencode_api_password, "pw")
         self.assertEqual(config.opencode_api_timeout_seconds, 150)
         self.assertEqual(config.allowed_chat_ids, {123, 456})
+        self.assertFalse(config.allow_all_chats)
         self.assertEqual(config.log_level, "INFO")
+
+    def test_bridge_config_denies_all_chats_by_default(self):
+        config = BridgeConfig.from_mapping(
+            {
+                "TELEGRAM_BOT_TOKEN": "123:token",
+                "OPENCODE_MODEL": "opencode/big-pickle",
+                "OPENCODE_WORKING_DIR": "/tmp/project",
+                "OPENCODE_TIMEOUT_SECONDS": "600",
+                "OPENCODE_MAX_CONCURRENT": "1",
+            }
+        )
+
+        self.assertEqual(config.allowed_chat_ids, set())
+        self.assertFalse(config.allow_all_chats)
+
+    def test_bridge_config_allows_all_chats_when_explicitly_enabled(self):
+        config = BridgeConfig.from_mapping(
+            {
+                "TELEGRAM_BOT_TOKEN": "123:token",
+                "OPENCODE_MODEL": "opencode/big-pickle",
+                "OPENCODE_WORKING_DIR": "/tmp/project",
+                "OPENCODE_TIMEOUT_SECONDS": "600",
+                "OPENCODE_MAX_CONCURRENT": "1",
+                "TELEGRAM_ALLOW_ALL_CHATS": "1",
+            }
+        )
+
+        self.assertTrue(config.allow_all_chats)
 
     def test_bridge_config_parses_input_and_output_llm_roles(self):
         config = BridgeConfig.from_mapping(
@@ -142,6 +177,45 @@ class TestAppConfig(unittest.TestCase):
 
             self.assertEqual(loaded["OPENCODE_SERVER_USERNAME"], "server-user")
             self.assertEqual(loaded["OPENCODE_SERVER_PASSWORD"], "server-pw")
+
+    def test_merged_config_reads_secret_from_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "bridge.env"
+            secret_file = Path(temp_dir) / "token.secret"
+            secret_file.write_text("123:file-token\n", encoding="utf-8")
+
+            write_env_file(
+                config_path,
+                {
+                    "TELEGRAM_BOT_TOKEN_FILE": str(secret_file),
+                    "OPENCODE_MODEL": "opencode/big-pickle",
+                    "OPENCODE_WORKING_DIR": temp_dir,
+                    "OPENCODE_TIMEOUT_SECONDS": "600",
+                    "OPENCODE_MAX_CONCURRENT": "1",
+                },
+            )
+
+            config = _merged_config(config_path)
+
+            self.assertEqual(config.telegram_token, "123:file-token")
+
+    def test_merged_config_uses_env_secret_when_not_in_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "bridge.env"
+            write_env_file(
+                config_path,
+                {
+                    "OPENCODE_MODEL": "opencode/big-pickle",
+                    "OPENCODE_WORKING_DIR": temp_dir,
+                    "OPENCODE_TIMEOUT_SECONDS": "600",
+                    "OPENCODE_MAX_CONCURRENT": "1",
+                },
+            )
+
+            with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "123:env-token"}, clear=False):
+                config = _merged_config(config_path)
+
+            self.assertEqual(config.telegram_token, "123:env-token")
 
     def test_uninstall_systemd_command_removes_unit(self):
         from src.telewatch import app as app_module

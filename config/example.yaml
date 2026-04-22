@@ -9,6 +9,7 @@
 telegram:
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   allowed_chat_ids: "${TELEGRAM_ALLOWED_CHAT_IDS}"
+  allow_all_chats: "${TELEGRAM_ALLOW_ALL_CHATS}"
 
 opencode:
   model: "${OPENCODE_MODEL}"

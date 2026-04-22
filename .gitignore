@@ -62,4 +62,4 @@ htmlcov/
 *.tmp
 
 # Documentation
-docs/
+DOCS/

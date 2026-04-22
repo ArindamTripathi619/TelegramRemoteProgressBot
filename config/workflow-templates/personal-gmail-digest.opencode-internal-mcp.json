@@ -1,0 +1,22 @@
+{
+  "id": "personal_gmail_digest",
+  "name": "Personal Gmail Digest",
+  "enabled": true,
+  "timezone": "local",
+  "schedule": "cron:0 9 * * *",
+  "targets": [123456789],
+  "metadata": {
+    "owner": "telewatch",
+    "mode": "opencode_internal_mcp",
+    "mcp_profile": "gws-arindam"
+  },
+  "steps": [
+    {
+      "type": "opencode_prompt",
+      "prompt_template": "Using MCP server profile gws-arindam, fetch the top 10 most important Gmail messages from the past 24 hours and create a concise digest. For each mail include sender, subject, and one-line why-it-matters. Group similar threads and keep the final output short and actionable."
+    },
+    {
+      "type": "telegram_send"
+    }
+  ]
+}

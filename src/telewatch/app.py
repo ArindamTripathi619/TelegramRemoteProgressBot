@@ -1,16 +1,30 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import signal
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
 from .opencode_bridge import BridgeConfig, run_bridge
+from .workflows import (
+    DEFAULT_WORKFLOWS_FILE,
+    DEFAULT_WORKFLOWS_STATE_FILE,
+    WorkflowManager,
+    WorkflowStateStore,
+    create_manager,
+    load_workflows,
+    _format_timestamp,
+    _next_run_timestamp,
+    sample_workflows,
+    save_workflows,
+)
 
 APP_DIR = Path.home() / ".config" / "telewatch"
 CONFIG_FILE = APP_DIR / "bridge.env"
@@ -21,6 +35,8 @@ SYSTEMD_UNIT_NAME = "telewatch.service"
 SYSTEMD_UNIT_FILE = SYSTEMD_USER_DIR / SYSTEMD_UNIT_NAME
 OPENCODE_SYSTEMD_UNIT_NAME = "opencode.service"
 OPENCODE_SYSTEMD_UNIT_FILE = SYSTEMD_USER_DIR / OPENCODE_SYSTEMD_UNIT_NAME
+WORKFLOWS_FILE = DEFAULT_WORKFLOWS_FILE
+WORKFLOWS_STATE_FILE = DEFAULT_WORKFLOWS_STATE_FILE
 
 CONFIG_KEYS = [
     "TELEGRAM_BOT_TOKEN",
@@ -35,6 +51,7 @@ CONFIG_KEYS = [
     "OPENCODE_SERVER_USERNAME",
     "OPENCODE_SERVER_PASSWORD",
     "TELEGRAM_ALLOWED_CHAT_IDS",
+    "TELEGRAM_ALLOW_ALL_CHATS",
     "LOG_LEVEL",
     "TELEWATCH_INPUT_LLM_ENABLED",
     "TELEWATCH_INPUT_LLM_PROVIDER",
@@ -55,7 +72,53 @@ CONFIG_KEYS = [
     "TELEWATCH_DECORATOR_MODEL",
     "TELEWATCH_DECORATOR_BASE_URL",
     "TELEWATCH_DECORATOR_TIMEOUT_SECONDS",
+    "TELEGRAM_BOT_TOKEN_FILE",
+    "OPENCODE_API_PASSWORD_FILE",
+    "OPENCODE_SERVER_PASSWORD_FILE",
+    "TELEWATCH_INPUT_LLM_API_KEY_FILE",
+    "TELEWATCH_OUTPUT_LLM_API_KEY_FILE",
+    "TELEWATCH_DECORATOR_API_KEY_FILE",
 ]
+
+SENSITIVE_CONFIG_KEYS = (
+    "TELEGRAM_BOT_TOKEN",
+    "OPENCODE_API_PASSWORD",
+    "OPENCODE_SERVER_PASSWORD",
+    "TELEWATCH_INPUT_LLM_API_KEY",
+    "TELEWATCH_OUTPUT_LLM_API_KEY",
+    "TELEWATCH_DECORATOR_API_KEY",
+)
+
+
+def _read_secret_from_file(path_value: str) -> str:
+    secret_path = Path(path_value).expanduser()
+    if not secret_path.exists():
+        raise FileNotFoundError(f"Secret file does not exist: {secret_path}")
+    if not secret_path.is_file():
+        raise ValueError(f"Secret path is not a file: {secret_path}")
+    return secret_path.read_text(encoding="utf-8").strip()
+
+
+def _hydrate_sensitive_values(data: Dict[str, str]) -> Dict[str, str]:
+    hydrated = dict(data)
+    for key in SENSITIVE_CONFIG_KEYS:
+        existing = hydrated.get(key, "").strip()
+        if existing:
+            continue
+
+        file_key = f"{key}_FILE"
+        file_value = hydrated.get(file_key, "").strip() or os.environ.get(file_key, "").strip()
+        if file_value:
+            try:
+                hydrated[key] = _read_secret_from_file(file_value)
+            except Exception as exc:
+                raise ValueError(f"Could not read {file_key}: {exc}") from exc
+            continue
+
+        env_value = os.environ.get(key, "").strip()
+        if env_value:
+            hydrated[key] = env_value
+    return hydrated
 
 
 def _prompt(
@@ -113,6 +176,7 @@ def read_env_file(path: Path) -> Dict[str, str]:
 
 def write_env_file(path: Path, data: Dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
     lines = ["# TeleWatch bridge configuration"]
     for key in CONFIG_KEYS:
         value = data.get(key, "")
@@ -125,6 +189,7 @@ def write_env_file(path: Path, data: Dict[str, str]) -> None:
 def _merged_config(config_path: Path, overrides: Optional[Dict[str, str]] = None) -> BridgeConfig:
     data = read_env_file(config_path)
     data.update(overrides or {})
+    data = _hydrate_sensitive_values(data)
     return BridgeConfig.from_mapping(data)
 
 
@@ -269,6 +334,140 @@ def _ensure_opencode_running() -> None:
     _systemctl("start", OPENCODE_SYSTEMD_UNIT_NAME)
 
 
+def _workflow_config_from_args(args: argparse.Namespace) -> BridgeConfig:
+    config_path = Path(getattr(args, "config", CONFIG_FILE))
+    overrides: Dict[str, str] = {}
+    if getattr(args, "debug", False):
+        overrides["LOG_LEVEL"] = "DEBUG"
+    if getattr(args, "log_level", None):
+        overrides["LOG_LEVEL"] = str(args.log_level)
+    return _merged_config(config_path, overrides)
+
+
+def _workflow_manager_from_args(args: argparse.Namespace) -> WorkflowManager:
+    from .opencode_bridge import OpenCodeBridge
+
+    config = _workflow_config_from_args(args)
+    workflows_file = Path(getattr(args, "workflows_file", WORKFLOWS_FILE))
+    state_file = Path(getattr(args, "state_file", WORKFLOWS_STATE_FILE))
+    return create_manager(
+        config,
+        OpenCodeBridge(config),
+        workflows_file=workflows_file,
+        state_file=state_file,
+    )
+
+
+def workflows_init_command(args: argparse.Namespace) -> None:
+    workflows_file = Path(getattr(args, "workflows_file", WORKFLOWS_FILE))
+    force = getattr(args, "force", False)
+    if workflows_file.exists() and not force:
+        print(f"Workflow file already exists: {workflows_file}")
+        print("Use --force to overwrite it.")
+        return
+
+    save_workflows(workflows_file, sample_workflows())
+    print(f"Wrote sample workflows to {workflows_file}")
+
+
+def workflows_validate_command(args: argparse.Namespace) -> None:
+    workflows_file = Path(getattr(args, "workflows_file", WORKFLOWS_FILE))
+    try:
+        load_workflows(workflows_file)
+    except Exception as exc:
+        print(f"Workflow validation error: {exc}")
+        raise SystemExit(1)
+
+    print(f"Workflows file is valid: {workflows_file}")
+
+
+def workflows_list_command(args: argparse.Namespace) -> None:
+    workflows_file = Path(getattr(args, "workflows_file", WORKFLOWS_FILE))
+    state_file = Path(getattr(args, "state_file", WORKFLOWS_STATE_FILE))
+    try:
+        workflows = load_workflows(workflows_file)
+    except Exception as exc:
+        print(f"Workflow file error: {exc}")
+        raise SystemExit(1)
+
+    state_store = WorkflowStateStore(state_file)
+
+    if not workflows:
+        print(f"No workflows found at {workflows_file}")
+        return
+
+    now = time.time()
+    lines = [f"Workflows file: {workflows_file}"]
+    for workflow in workflows:
+        state = state_store.get(workflow.id)
+        state.next_run_at = _next_run_timestamp(workflow, state, now)
+        status = state.last_status
+        enabled = "enabled" if workflow.enabled else "disabled"
+        lines.append(
+            f"- {workflow.id}: {workflow.name} | {enabled} | schedule={workflow.schedule} | "
+            f"last={_format_timestamp(state.last_run_at)} | next={_format_timestamp(state.next_run_at)} | "
+            f"status={status} | targets={workflow.targets or 'none'}"
+        )
+    print("\n".join(lines))
+
+
+def workflows_run_command(args: argparse.Namespace) -> None:
+    from telegram import Bot
+
+    workflow_id = getattr(args, "id", "").strip()
+    if not workflow_id:
+        print("Missing workflow id")
+        raise SystemExit(1)
+
+    manager = _workflow_manager_from_args(args)
+    telegram_bot = Bot(token=manager.config.telegram_token)
+    result = asyncio.run(manager.run_workflow(workflow_id, telegram_bot=telegram_bot, manual=True))
+    if result.status == "success":
+        print(f"Workflow {workflow_id} completed in {result.duration_seconds:.2f}s")
+        if result.output:
+            print(result.output)
+        return
+
+    if result.status == "skipped":
+        print(f"Workflow {workflow_id} skipped: {result.skipped_reason}")
+        return
+
+    print(f"Workflow {workflow_id} failed: {result.error}")
+    raise SystemExit(1)
+
+
+def workflows_pause_command(args: argparse.Namespace) -> None:
+    workflow_id = getattr(args, "id", "").strip()
+    if not workflow_id:
+        print("Missing workflow id")
+        raise SystemExit(1)
+
+    manager = _workflow_manager_from_args(args)
+    manager.set_paused(workflow_id, True)
+    print(f"Paused workflow: {workflow_id}")
+
+
+def workflows_resume_command(args: argparse.Namespace) -> None:
+    workflow_id = getattr(args, "id", "").strip()
+    if not workflow_id:
+        print("Missing workflow id")
+        raise SystemExit(1)
+
+    manager = _workflow_manager_from_args(args)
+    manager.set_paused(workflow_id, False)
+    print(f"Resumed workflow: {workflow_id}")
+
+
+def workflows_status_command(args: argparse.Namespace) -> None:
+    workflow_id = getattr(args, "id", "").strip()
+    if not workflow_id:
+        print("Missing workflow id")
+        raise SystemExit(1)
+
+    manager = _workflow_manager_from_args(args)
+    print(manager.status_text(workflow_id))
+
+
 def install_systemd_command(args: argparse.Namespace) -> None:
     workspace_dir = Path(args.workspace).resolve() if args.workspace else Path.cwd().resolve()
 
@@ -396,10 +595,15 @@ def setup_command(_: argparse.Namespace) -> None:
         return f"<set:{count} id(s)>"
 
     config["TELEGRAM_ALLOWED_CHAT_IDS"] = _prompt(
-        "Allowed chat ids (comma-separated, blank = allow all)",
+        "Allowed chat ids (comma-separated, blank = reject all)",
         current.get("TELEGRAM_ALLOWED_CHAT_IDS", ""),
         display_default=_chat_ids_default(current.get("TELEGRAM_ALLOWED_CHAT_IDS", "")),
     )
+    allow_all_default = "Y" if current.get("TELEGRAM_ALLOW_ALL_CHATS", "0") in {"1", "true", "yes", "on"} else "N"
+    config["TELEGRAM_ALLOW_ALL_CHATS"] = "1" if _prompt(
+        "Allow all chats? [y/N]",
+        allow_all_default,
+    ).lower() in {"y", "yes"} else "0"
 
     def configure_llm_role(prefix: str, label: str) -> None:
         enabled_default = "Y" if current.get(f"{prefix}_ENABLED", "0") in {"1", "true", "yes", "on"} else "N"
@@ -600,6 +804,48 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Show whether the bridge is running")
     status_parser.set_defaults(func=status_command)
+
+    workflows_parser = subparsers.add_parser("workflows", help="Manage recurring workflows")
+    workflows_parser.add_argument("--config", type=Path, default=CONFIG_FILE, help="Path to bridge env file")
+    workflows_parser.add_argument(
+        "--workflows-file",
+        type=Path,
+        default=WORKFLOWS_FILE,
+        help="Path to the workflows definition file",
+    )
+    workflows_parser.add_argument(
+        "--state-file",
+        type=Path,
+        default=WORKFLOWS_STATE_FILE,
+        help="Path to the workflow state file",
+    )
+    workflows_subparsers = workflows_parser.add_subparsers(dest="workflow_command")
+
+    workflows_init_parser = workflows_subparsers.add_parser("init", help="Create a sample workflows file")
+    workflows_init_parser.add_argument("--force", action="store_true", help="Overwrite an existing workflows file")
+    workflows_init_parser.set_defaults(func=workflows_init_command)
+
+    workflows_list_parser = workflows_subparsers.add_parser("list", help="List configured workflows")
+    workflows_list_parser.set_defaults(func=workflows_list_command)
+
+    workflows_validate_parser = workflows_subparsers.add_parser("validate", help="Validate the workflows file")
+    workflows_validate_parser.set_defaults(func=workflows_validate_command)
+
+    workflows_run_parser = workflows_subparsers.add_parser("run", help="Run a workflow immediately")
+    workflows_run_parser.add_argument("--id", required=True, help="Workflow id to run")
+    workflows_run_parser.set_defaults(func=workflows_run_command)
+
+    workflows_pause_parser = workflows_subparsers.add_parser("pause", help="Pause a workflow")
+    workflows_pause_parser.add_argument("--id", required=True, help="Workflow id to pause")
+    workflows_pause_parser.set_defaults(func=workflows_pause_command)
+
+    workflows_resume_parser = workflows_subparsers.add_parser("resume", help="Resume a workflow")
+    workflows_resume_parser.add_argument("--id", required=True, help="Workflow id to resume")
+    workflows_resume_parser.set_defaults(func=workflows_resume_command)
+
+    workflows_status_parser = workflows_subparsers.add_parser("status", help="Show workflow status")
+    workflows_status_parser.add_argument("--id", required=True, help="Workflow id to inspect")
+    workflows_status_parser.set_defaults(func=workflows_status_command)
 
     install_systemd_parser = subparsers.add_parser("install-systemd", help="Install the user systemd unit")
     install_systemd_parser.add_argument(
