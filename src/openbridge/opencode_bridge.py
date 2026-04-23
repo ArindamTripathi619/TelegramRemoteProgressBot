@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, List, Mapping, Optional, Set
@@ -1604,6 +1605,7 @@ def run_bridge(
     foreground: bool = True,
     log_file: Optional[Path] = None,
     workflow_manager: Any = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
     configure_logging(config.log_level, log_file=log_file, foreground=foreground)
     logger.info("Starting OpenCode Telegram bridge bot")
@@ -1616,7 +1618,27 @@ def run_bridge(
         except Exception:
             workflow_manager = None
     app = build_application(config, bridge=bridge, workflow_manager=workflow_manager)
-    app.run_polling(close_loop=False)
+
+    stop_watcher: Optional[threading.Thread] = None
+    if stop_event is not None:
+
+        def _wait_for_stop() -> None:
+            stop_event.wait()
+            try:
+                app.stop_running()
+            except Exception:
+                logger.exception("Failed to stop application after shutdown signal")
+
+        stop_watcher = threading.Thread(target=_wait_for_stop, name="openbridge-stop-watcher", daemon=True)
+        stop_watcher.start()
+
+    try:
+        app.run_polling(close_loop=False, stop_signals=None)
+    finally:
+        if stop_event is not None:
+            stop_event.set()
+        if stop_watcher is not None and stop_watcher.is_alive():
+            stop_watcher.join(timeout=1)
 
 
 async def _handle_application_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

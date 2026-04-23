@@ -1,3 +1,5 @@
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,8 +13,13 @@ from src.openbridge.app import (
     _build_opencode_systemd_unit,
     _build_systemd_unit,
     _install_missing_dependencies,
+    _load_pid,
     _merged_config,
     _missing_dependencies,
+    _show_banner,
+    build_parser,
+    get_resource_path,
+    is_process_alive,
     read_env_file,
     write_env_file,
 )
@@ -182,6 +189,60 @@ class TestAppConfig(unittest.TestCase):
         self.assertIn("OpenCode API Server", unit_text)
         self.assertIn("opencode serve --hostname 127.0.0.1 --port 4096", unit_text)
         self.assertIn("EnvironmentFile=", unit_text)
+
+    def test_version_flag_prints_release_version(self):
+        parser = build_parser()
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), self.assertRaises(SystemExit) as exc:
+            parser.parse_args(["--version"])
+
+        self.assertEqual(exc.exception.code, 0)
+        self.assertIn("openbridge 1.0.0", buffer.getvalue())
+
+    def test_show_banner_prints_colored_ascii_art(self):
+        from src.openbridge import app as app_module
+
+        class TtyBuffer(io.StringIO):
+            def isatty(self):
+                return True
+
+        buffer = TtyBuffer()
+        with patch.object(app_module.sys, "stdout", buffer):
+            _show_banner()
+
+        output = buffer.getvalue()
+        self.assertIn("OpenBridge", output)
+        self.assertIn("\x1b[38;5;", output)
+        self.assertIn("v1.0.0", output)
+
+    def test_get_resource_path_uses_bundle_root_when_present(self):
+        from src.openbridge import app as app_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_root = Path(temp_dir)
+            with patch.object(app_module.sys, "_MEIPASS", bundle_root, create=True):
+                resource_path = get_resource_path("assets", "banner.txt")
+
+        self.assertEqual(resource_path, bundle_root / "assets" / "banner.txt")
+
+    def test_load_pid_removes_stale_pid_file(self):
+        from src.openbridge import app as app_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pid_file = Path(temp_dir) / "openbridge.pid"
+            pid_file.write_text("999999\n", encoding="utf-8")
+
+            with patch.object(app_module, "PID_FILE", pid_file), patch.object(
+                app_module, "is_process_alive", return_value=False
+            ):
+                pid = _load_pid()
+
+        self.assertIsNone(pid)
+        self.assertFalse(pid_file.exists())
+
+    def test_is_process_alive_handles_invalid_pid(self):
+        self.assertFalse(is_process_alive(-1))
 
     def test_setup_writes_opencode_server_auth(self):
         with tempfile.TemporaryDirectory() as temp_dir:

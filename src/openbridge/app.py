@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import argparse
 import asyncio
 import json
@@ -9,9 +10,11 @@ import shutil
 import subprocess
 import sys
 import time
+import threading
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
+from . import __version__
 from .opencode_bridge import BridgeConfig, run_bridge
 from .workflows import (
     DEFAULT_WORKFLOWS_FILE,
@@ -68,16 +71,14 @@ REQUIRED_DEPENDENCIES = {
     },
 }
 
-OPENBRIDGE_BANNER_CMD = [
-    "npx",
-    "--yes",
-    "oh-my-logo",
-    "OpenBridge",
-    "sunset",
-    "--filled",
-    "--block-font",
-    "block",
-]
+OPENBRIDGE_BANNER = (
+    "\x1b[38;5;214m   ____                   ____      _       _        \x1b[0m\n"
+    "\x1b[38;5;208m  / __ \\  ___  ___ _ __ | __ ) ___| |__   (_)___    \x1b[0m\n"
+    "\x1b[38;5;202m | |  | |/ _ \\/ _ \\ '_ \\|  _ \\/ _ \\ '_ \\  | / __|   \x1b[0m\n"
+    "\x1b[38;5;220m | |__| |  __/  __/ |_) | |_) |  __/ |_) | | \\__ \\   \x1b[0m\n"
+    "\x1b[38;5;226m  \\____/ \\___|\\___| .__/|____/ \\___|_.__/  |_|___/   \x1b[0m\n"
+    "\x1b[38;5;214m                    |_|                              v{version}\x1b[0m"
+)
 
 CONFIG_KEYS = [
     "TELEGRAM_BOT_TOKEN",
@@ -243,6 +244,50 @@ def _with_legacy_openbridge_aliases(data: Dict[str, str]) -> Dict[str, str]:
     return normalized
 
 
+def get_resource_path(*parts: str) -> Path:
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return bundle_root.joinpath(*parts)
+
+
+def is_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return False
+        if exc.errno == errno.EPERM:
+            return True
+        return False
+    return True
+
+
+def _install_signal_handlers(stop_event: threading.Event) -> Dict[int, Any]:
+    previous_handlers: Dict[int, Any] = {}
+
+    def _handle_signal(_signum: int, _frame: Any) -> None:
+        stop_event.set()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous_handlers[signum] = signal.signal(signum, _handle_signal)
+
+    return previous_handlers
+
+
+def _restore_signal_handlers(previous_handlers: Dict[int, Any]) -> None:
+    for signum, handler in previous_handlers.items():
+        try:
+            signal.signal(signum, handler)
+        except Exception:
+            pass
+
+
 def _merged_config(config_path: Path, overrides: Optional[Dict[str, str]] = None) -> BridgeConfig:
     data = read_env_file(config_path)
     data.update(overrides or {})
@@ -288,9 +333,16 @@ def _load_pid() -> Optional[int]:
     if not PID_FILE.exists():
         return None
     try:
-        return int(PID_FILE.read_text(encoding="utf-8").strip())
+        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
     except ValueError:
+        _remove_pid()
         return None
+
+    if not is_process_alive(pid):
+        _remove_pid()
+        return None
+
+    return pid
 
 
 def _build_systemd_unit(workspace_dir: Path) -> str:
@@ -418,15 +470,10 @@ def _show_banner() -> None:
     # Avoid noisy ANSI output in non-interactive contexts.
     if not sys.stdout.isatty():
         return
-    if shutil.which("npx") is None:
-        return
 
-    try:
-        subprocess.run(OPENBRIDGE_BANNER_CMD, check=False)
-    except Exception:
-        return
-
-    print("  Telegram <-> OpenCode Bridge  *  v1.0.0\n")
+    print(OPENBRIDGE_BANNER.format(version=__version__))
+    print("\x1b[38;5;214m  OpenBridge\x1b[0m")
+    print("\x1b[38;5;244m  Telegram <-> OpenCode Bridge\x1b[0m\n")
 
 
 def _install_opencode_systemd_unit(workspace_dir: Path) -> None:
@@ -860,15 +907,21 @@ def start_command(args: argparse.Namespace) -> None:
     else:
         print("systemctl not found; assuming OpenCode server is already running.")
 
-    if not getattr(args, "foreground", False):
-        _daemonize(LOG_FILE)
-        _write_pid()
+    foreground = getattr(args, "foreground", False)
+    stop_event = threading.Event()
+    previous_signal_handlers = _install_signal_handlers(stop_event)
+    try:
+        if not foreground:
+            _daemonize(LOG_FILE)
+            _write_pid()
+
         try:
-            run_bridge(config, foreground=False, log_file=LOG_FILE)
+            run_bridge(config, foreground=foreground, log_file=LOG_FILE, stop_event=stop_event)
         finally:
-            _remove_pid()
-    else:
-        run_bridge(config, foreground=True, log_file=LOG_FILE)
+            if not foreground:
+                _remove_pid()
+    finally:
+        _restore_signal_handlers(previous_signal_handlers)
 
 
 def stop_command(args: argparse.Namespace) -> None:
@@ -924,6 +977,7 @@ def status_command(_: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="openbridge", description="Telegram OpenCode Bridge")
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
     setup_parser = subparsers.add_parser("setup", help="Run the setup wizard")

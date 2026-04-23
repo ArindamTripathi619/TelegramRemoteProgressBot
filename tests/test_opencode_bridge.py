@@ -5,13 +5,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from threading import Event
+from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.openbridge.opencode_bridge import (
     BridgeConfig,
     OpenCodeBridge,
+    run_bridge,
     _chunk_message,
     _extract_session_id,
     _extract_text_candidates,
@@ -247,7 +249,6 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
             log_level="INFO",
         )
         bridge = OpenCodeBridge(config)
-
         chat_id = 123
         bridge._pending_workflow_drafts[chat_id] = {
             "workflow": {
@@ -284,6 +285,27 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
             payload = json.loads(workflow_file.read_text(encoding="utf-8"))
             self.assertEqual(payload["workflows"][0]["id"], "daily_digest")
             self.assertNotIn(chat_id, bridge._pending_workflow_drafts)
+
+    def test_run_bridge_accepts_stop_event(self):
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids=set(),
+            log_level="INFO",
+        )
+        fake_app = Mock()
+        fake_app.run_polling = Mock()
+        fake_app.stop_running = Mock()
+
+        with patch("src.openbridge.opencode_bridge.configure_logging"), patch(
+            "src.openbridge.opencode_bridge.OpenCodeBridge", return_value=Mock()
+        ), patch("src.openbridge.opencode_bridge.build_application", return_value=fake_app):
+            run_bridge(config, workflow_manager=Mock(), stop_event=Event())
+
+        fake_app.run_polling.assert_called_once_with(close_loop=False, stop_signals=None)
 
 
 if __name__ == "__main__":
