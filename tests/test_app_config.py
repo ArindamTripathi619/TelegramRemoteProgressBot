@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch, call
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.telewatch.app import (
+from src.openbridge.app import (
     _build_opencode_systemd_unit,
     _build_systemd_unit,
     _install_missing_dependencies,
@@ -16,7 +16,7 @@ from src.telewatch.app import (
     read_env_file,
     write_env_file,
 )
-from src.telewatch.opencode_bridge import BridgeConfig
+from src.openbridge.opencode_bridge import BridgeConfig
 
 
 class TestAppConfig(unittest.TestCase):
@@ -37,9 +37,9 @@ class TestAppConfig(unittest.TestCase):
                 "OPENCODE_SERVER_PASSWORD": "server-pw",
                 "TELEGRAM_ALLOWED_CHAT_IDS": "123,456",
                 "LOG_LEVEL": "DEBUG",
-                "TELEWATCH_INPUT_LLM_ENABLED": "1",
-                "TELEWATCH_INPUT_LLM_PROVIDER": "litellm",
-                "TELEWATCH_INPUT_LLM_MODEL": "groq-gpt-oss-mini",
+                "OPENBRIDGE_INPUT_LLM_ENABLED": "1",
+                "OPENBRIDGE_INPUT_LLM_PROVIDER": "litellm",
+                "OPENBRIDGE_INPUT_LLM_MODEL": "groq-gpt-oss-mini",
             }
 
             write_env_file(config_path, original)
@@ -49,7 +49,7 @@ class TestAppConfig(unittest.TestCase):
             self.assertEqual(loaded["OPENCODE_MODEL"], original["OPENCODE_MODEL"])
             self.assertEqual(loaded["TELEGRAM_ALLOWED_CHAT_IDS"], original["TELEGRAM_ALLOWED_CHAT_IDS"])
             self.assertEqual(loaded["LOG_LEVEL"], original["LOG_LEVEL"])
-            self.assertEqual(loaded["TELEWATCH_INPUT_LLM_PROVIDER"], "litellm")
+            self.assertEqual(loaded["OPENBRIDGE_INPUT_LLM_PROVIDER"], "litellm")
             self.assertEqual(loaded["OPENCODE_API_BASE_URL"], "http://127.0.0.1:4096")
 
     def test_bridge_config_from_mapping(self):
@@ -120,10 +120,37 @@ class TestAppConfig(unittest.TestCase):
                 "OPENCODE_WORKING_DIR": "/tmp/project",
                 "OPENCODE_TIMEOUT_SECONDS": "600",
                 "OPENCODE_MAX_CONCURRENT": "1",
+                "OPENBRIDGE_INPUT_LLM_ENABLED": "1",
+                "OPENBRIDGE_INPUT_LLM_PROVIDER": "litellm",
+                "OPENBRIDGE_INPUT_LLM_MODEL": "groq-gpt-oss-mini",
+                "OPENBRIDGE_INPUT_LLM_LITELLM_PORT": "8000",
+                "OPENBRIDGE_OUTPUT_LLM_ENABLED": "1",
+                "OPENBRIDGE_OUTPUT_LLM_PROVIDER": "api",
+                "OPENBRIDGE_OUTPUT_LLM_API_KEY": "sk-test",
+                "OPENBRIDGE_OUTPUT_LLM_MODEL": "some-model",
+                "OPENBRIDGE_OUTPUT_LLM_BASE_URL": "https://example.test/v1",
+            }
+        )
+
+        self.assertTrue(config.input_llm_enabled)
+        self.assertEqual(config.input_llm_provider, "litellm")
+        self.assertEqual(config.input_llm_model, "groq-gpt-oss-mini")
+        self.assertEqual(config.input_llm_litellm_port, 8000)
+        self.assertTrue(config.output_llm_enabled)
+        self.assertEqual(config.output_llm_provider, "api")
+        self.assertEqual(config.output_llm_api_key, "sk-test")
+
+    def test_bridge_config_accepts_legacy_telewatch_keys(self):
+        config = BridgeConfig.from_mapping(
+            {
+                "TELEGRAM_BOT_TOKEN": "123:token",
+                "OPENCODE_MODEL": "opencode/big-pickle",
+                "OPENCODE_WORKING_DIR": "/tmp/project",
+                "OPENCODE_TIMEOUT_SECONDS": "600",
+                "OPENCODE_MAX_CONCURRENT": "1",
                 "TELEWATCH_INPUT_LLM_ENABLED": "1",
                 "TELEWATCH_INPUT_LLM_PROVIDER": "litellm",
                 "TELEWATCH_INPUT_LLM_MODEL": "groq-gpt-oss-mini",
-                "TELEWATCH_INPUT_LLM_LITELLM_PORT": "8000",
                 "TELEWATCH_OUTPUT_LLM_ENABLED": "1",
                 "TELEWATCH_OUTPUT_LLM_PROVIDER": "api",
                 "TELEWATCH_OUTPUT_LLM_API_KEY": "sk-test",
@@ -135,7 +162,6 @@ class TestAppConfig(unittest.TestCase):
         self.assertTrue(config.input_llm_enabled)
         self.assertEqual(config.input_llm_provider, "litellm")
         self.assertEqual(config.input_llm_model, "groq-gpt-oss-mini")
-        self.assertEqual(config.input_llm_litellm_port, 8000)
         self.assertTrue(config.output_llm_enabled)
         self.assertEqual(config.output_llm_provider, "api")
         self.assertEqual(config.output_llm_api_key, "sk-test")
@@ -219,11 +245,42 @@ class TestAppConfig(unittest.TestCase):
 
             self.assertEqual(config.telegram_token, "123:env-token")
 
+    def test_merged_config_maps_legacy_secret_file_keys(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "bridge.env"
+            secret_file = Path(temp_dir) / "legacy-input-key.secret"
+            secret_file.write_text("legacy-secret-key\n", encoding="utf-8")
+
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'export TELEGRAM_BOT_TOKEN="123:token"',
+                        'export OPENCODE_MODEL="opencode/big-pickle"',
+                        f'export OPENCODE_WORKING_DIR="{temp_dir}"',
+                        'export OPENCODE_TIMEOUT_SECONDS="600"',
+                        'export OPENCODE_MAX_CONCURRENT="1"',
+                        'export TELEWATCH_INPUT_LLM_ENABLED="1"',
+                        'export TELEWATCH_INPUT_LLM_PROVIDER="api"',
+                        'export TELEWATCH_INPUT_LLM_MODEL="legacy-model"',
+                        'export TELEWATCH_INPUT_LLM_BASE_URL="https://example.test/v1"',
+                        f'export TELEWATCH_INPUT_LLM_API_KEY_FILE="{secret_file}"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            config = _merged_config(config_path)
+
+            self.assertTrue(config.input_llm_enabled)
+            self.assertEqual(config.input_llm_provider, "api")
+            self.assertEqual(config.input_llm_api_key, "legacy-secret-key")
+
     def test_uninstall_systemd_command_removes_unit(self):
-        from src.telewatch import app as app_module
+        from src.openbridge import app as app_module
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            unit_file = Path(temp_dir) / "telewatch.service"
+            unit_file = Path(temp_dir) / "openbridge.service"
             opencode_unit_file = Path(temp_dir) / "opencode.service"
             unit_file.write_text("[Unit]\n", encoding="utf-8")
             opencode_unit_file.write_text("[Unit]\n", encoding="utf-8")
@@ -231,7 +288,7 @@ class TestAppConfig(unittest.TestCase):
             with patch.object(app_module, "SYSTEMD_UNIT_FILE", unit_file), patch.object(
                 app_module, "OPENCODE_SYSTEMD_UNIT_FILE", opencode_unit_file
             ), patch.object(
-                app_module, "SYSTEMD_UNIT_NAME", "telewatch.service"
+                app_module, "SYSTEMD_UNIT_NAME", "openbridge.service"
             ), patch.object(
                 app_module, "OPENCODE_SYSTEMD_UNIT_NAME", "opencode.service"
             ), patch.object(app_module.shutil, "which", return_value="/bin/systemctl"), patch.object(
@@ -244,14 +301,14 @@ class TestAppConfig(unittest.TestCase):
                 self.assertEqual(
                     [call.args[0] for call in mock_run.call_args_list],
                     [
-                        ["systemctl", "--user", "disable", "telewatch.service"],
+                        ["systemctl", "--user", "disable", "openbridge.service"],
                         ["systemctl", "--user", "disable", "opencode.service"],
                         ["systemctl", "--user", "daemon-reload"],
                     ],
                 )
 
     def test_start_command_runs_opencode_preflight(self):
-        from src.telewatch import app as app_module
+        from src.openbridge import app as app_module
 
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "bridge.env"
@@ -281,7 +338,7 @@ class TestAppConfig(unittest.TestCase):
                 mock_run_bridge.assert_called_once()
 
     def test_stop_command_stops_systemd_service_when_pid_missing(self):
-        from src.telewatch import app as app_module
+        from src.openbridge import app as app_module
 
         with patch.object(app_module, "_load_pid", return_value=None), patch.object(
             app_module.shutil, "which", return_value="/bin/systemctl"
@@ -293,13 +350,13 @@ class TestAppConfig(unittest.TestCase):
             self.assertEqual(
                 [call.args[0] for call in mock_run.call_args_list],
                 [
-                    ["systemctl", "--user", "is-active", "--quiet", "telewatch.service"],
-                    ["systemctl", "--user", "stop", "telewatch.service"],
+                    ["systemctl", "--user", "is-active", "--quiet", "openbridge.service"],
+                    ["systemctl", "--user", "stop", "openbridge.service"],
                 ],
             )
 
     def test_stop_command_force_terminates_foreground_process(self):
-        from src.telewatch import app as app_module
+        from src.openbridge import app as app_module
 
         with patch.object(app_module, "_load_pid", return_value=None), patch.object(
             app_module.shutil, "which"
@@ -322,8 +379,8 @@ class TestAppConfig(unittest.TestCase):
             self.assertEqual(
                 [call.args[0] for call in mock_run.call_args_list],
                 [
-                    ["systemctl", "--user", "is-active", "--quiet", "telewatch.service"],
-                    ["pkill", "-f", "telewatch start.*--foreground"],
+                    ["systemctl", "--user", "is-active", "--quiet", "openbridge.service"],
+                    ["pkill", "-f", "openbridge start.*--foreground"],
                 ],
             )
 
@@ -333,7 +390,7 @@ class TestAppConfig(unittest.TestCase):
                 return f"/usr/bin/{binary}"
             return None
 
-        with patch("src.telewatch.app.shutil.which", side_effect=which_side_effect):
+        with patch("src.openbridge.app.shutil.which", side_effect=which_side_effect):
             missing = _missing_dependencies()
 
         self.assertIn("opencode", missing)
@@ -361,9 +418,9 @@ class TestAppConfig(unittest.TestCase):
                 return "/usr/bin/npm"
             return None
 
-        with patch("src.telewatch.app._prompt", return_value="y"), patch(
-            "src.telewatch.app.shutil.which", side_effect=which_side_effect
-        ), patch("src.telewatch.app.subprocess.run") as mock_run, patch("builtins.print"):
+        with patch("src.openbridge.app._prompt", return_value="y"), patch(
+            "src.openbridge.app.shutil.which", side_effect=which_side_effect
+        ), patch("src.openbridge.app.subprocess.run") as mock_run, patch("builtins.print"):
             _install_missing_dependencies(missing)
 
         self.assertEqual(

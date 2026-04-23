@@ -26,17 +26,19 @@ from .workflows import (
     save_workflows,
 )
 
-APP_DIR = Path.home() / ".config" / "telewatch"
+APP_DIR = Path.home() / ".config" / "openbridge"
 CONFIG_FILE = APP_DIR / "bridge.env"
-LOG_FILE = APP_DIR / "telewatch.log"
-PID_FILE = APP_DIR / "telewatch.pid"
+LOG_FILE = APP_DIR / "openbridge.log"
+PID_FILE = APP_DIR / "openbridge.pid"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
-SYSTEMD_UNIT_NAME = "telewatch.service"
+SYSTEMD_UNIT_NAME = "openbridge.service"
 SYSTEMD_UNIT_FILE = SYSTEMD_USER_DIR / SYSTEMD_UNIT_NAME
 OPENCODE_SYSTEMD_UNIT_NAME = "opencode.service"
 OPENCODE_SYSTEMD_UNIT_FILE = SYSTEMD_USER_DIR / OPENCODE_SYSTEMD_UNIT_NAME
 WORKFLOWS_FILE = DEFAULT_WORKFLOWS_FILE
 WORKFLOWS_STATE_FILE = DEFAULT_WORKFLOWS_STATE_FILE
+LEGACY_ENV_PREFIX = "TELEWATCH_"
+CURRENT_ENV_PREFIX = "OPENBRIDGE_"
 
 REQUIRED_DEPENDENCIES = {
     "npm": {
@@ -66,6 +68,17 @@ REQUIRED_DEPENDENCIES = {
     },
 }
 
+OPENBRIDGE_BANNER_CMD = [
+    "npx",
+    "--yes",
+    "oh-my-logo",
+    "OpenBridge",
+    "sunset",
+    "--filled",
+    "--block-font",
+    "block",
+]
+
 CONFIG_KEYS = [
     "TELEGRAM_BOT_TOKEN",
     "OPENCODE_MODEL",
@@ -81,40 +94,40 @@ CONFIG_KEYS = [
     "TELEGRAM_ALLOWED_CHAT_IDS",
     "TELEGRAM_ALLOW_ALL_CHATS",
     "LOG_LEVEL",
-    "TELEWATCH_INPUT_LLM_ENABLED",
-    "TELEWATCH_INPUT_LLM_PROVIDER",
-    "TELEWATCH_INPUT_LLM_API_KEY",
-    "TELEWATCH_INPUT_LLM_MODEL",
-    "TELEWATCH_INPUT_LLM_BASE_URL",
-    "TELEWATCH_INPUT_LLM_LITELLM_PORT",
-    "TELEWATCH_INPUT_LLM_TIMEOUT_SECONDS",
-    "TELEWATCH_OUTPUT_LLM_ENABLED",
-    "TELEWATCH_OUTPUT_LLM_PROVIDER",
-    "TELEWATCH_OUTPUT_LLM_API_KEY",
-    "TELEWATCH_OUTPUT_LLM_MODEL",
-    "TELEWATCH_OUTPUT_LLM_BASE_URL",
-    "TELEWATCH_OUTPUT_LLM_LITELLM_PORT",
-    "TELEWATCH_OUTPUT_LLM_TIMEOUT_SECONDS",
-    "TELEWATCH_DECORATOR_ENABLED",
-    "TELEWATCH_DECORATOR_API_KEY",
-    "TELEWATCH_DECORATOR_MODEL",
-    "TELEWATCH_DECORATOR_BASE_URL",
-    "TELEWATCH_DECORATOR_TIMEOUT_SECONDS",
+    "OPENBRIDGE_INPUT_LLM_ENABLED",
+    "OPENBRIDGE_INPUT_LLM_PROVIDER",
+    "OPENBRIDGE_INPUT_LLM_API_KEY",
+    "OPENBRIDGE_INPUT_LLM_MODEL",
+    "OPENBRIDGE_INPUT_LLM_BASE_URL",
+    "OPENBRIDGE_INPUT_LLM_LITELLM_PORT",
+    "OPENBRIDGE_INPUT_LLM_TIMEOUT_SECONDS",
+    "OPENBRIDGE_OUTPUT_LLM_ENABLED",
+    "OPENBRIDGE_OUTPUT_LLM_PROVIDER",
+    "OPENBRIDGE_OUTPUT_LLM_API_KEY",
+    "OPENBRIDGE_OUTPUT_LLM_MODEL",
+    "OPENBRIDGE_OUTPUT_LLM_BASE_URL",
+    "OPENBRIDGE_OUTPUT_LLM_LITELLM_PORT",
+    "OPENBRIDGE_OUTPUT_LLM_TIMEOUT_SECONDS",
+    "OPENBRIDGE_DECORATOR_ENABLED",
+    "OPENBRIDGE_DECORATOR_API_KEY",
+    "OPENBRIDGE_DECORATOR_MODEL",
+    "OPENBRIDGE_DECORATOR_BASE_URL",
+    "OPENBRIDGE_DECORATOR_TIMEOUT_SECONDS",
     "TELEGRAM_BOT_TOKEN_FILE",
     "OPENCODE_API_PASSWORD_FILE",
     "OPENCODE_SERVER_PASSWORD_FILE",
-    "TELEWATCH_INPUT_LLM_API_KEY_FILE",
-    "TELEWATCH_OUTPUT_LLM_API_KEY_FILE",
-    "TELEWATCH_DECORATOR_API_KEY_FILE",
+    "OPENBRIDGE_INPUT_LLM_API_KEY_FILE",
+    "OPENBRIDGE_OUTPUT_LLM_API_KEY_FILE",
+    "OPENBRIDGE_DECORATOR_API_KEY_FILE",
 ]
 
 SENSITIVE_CONFIG_KEYS = (
     "TELEGRAM_BOT_TOKEN",
     "OPENCODE_API_PASSWORD",
     "OPENCODE_SERVER_PASSWORD",
-    "TELEWATCH_INPUT_LLM_API_KEY",
-    "TELEWATCH_OUTPUT_LLM_API_KEY",
-    "TELEWATCH_DECORATOR_API_KEY",
+    "OPENBRIDGE_INPUT_LLM_API_KEY",
+    "OPENBRIDGE_OUTPUT_LLM_API_KEY",
+    "OPENBRIDGE_DECORATOR_API_KEY",
 )
 
 
@@ -205,7 +218,7 @@ def read_env_file(path: Path) -> Dict[str, str]:
 def write_env_file(path: Path, data: Dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
-    lines = ["# TeleWatch bridge configuration"]
+    lines = ["# OpenBridge bridge configuration"]
     for key in CONFIG_KEYS:
         value = data.get(key, "")
         if value:
@@ -214,9 +227,26 @@ def write_env_file(path: Path, data: Dict[str, str]) -> None:
     os.chmod(path, 0o600)
 
 
+def _with_legacy_openbridge_aliases(data: Dict[str, str]) -> Dict[str, str]:
+    normalized = dict(data)
+    for key, value in data.items():
+        if not key.startswith(LEGACY_ENV_PREFIX):
+            continue
+
+        suffix = key[len(LEGACY_ENV_PREFIX) :]
+        current_key = f"{CURRENT_ENV_PREFIX}{suffix}"
+        current_value = str(normalized.get(current_key, "")).strip()
+        if current_value:
+            continue
+
+        normalized[current_key] = value
+    return normalized
+
+
 def _merged_config(config_path: Path, overrides: Optional[Dict[str, str]] = None) -> BridgeConfig:
     data = read_env_file(config_path)
     data.update(overrides or {})
+    data = _with_legacy_openbridge_aliases(data)
     data = _hydrate_sensitive_values(data)
     return BridgeConfig.from_mapping(data)
 
@@ -264,14 +294,14 @@ def _load_pid() -> Optional[int]:
 
 
 def _build_systemd_unit(workspace_dir: Path) -> str:
-    telewatch_executable = Path(sys.executable).resolve().parent / "telewatch"
-    exec_start = str(telewatch_executable)
-    if not telewatch_executable.exists():
-        exec_start = f"{sys.executable} -m telewatch.app start --foreground"
+    openbridge_executable = Path(sys.executable).resolve().parent / "openbridge"
+    exec_start = str(openbridge_executable)
+    if not openbridge_executable.exists():
+        exec_start = f"{sys.executable} -m openbridge.app start --foreground"
 
     return (
         "[Unit]\n"
-        "Description=TeleWatch Telegram OpenCode Bridge\n"
+        "Description=OpenBridge Telegram OpenCode Bridge\n"
         "Wants=network-online.target\n"
         "Wants=opencode.service\n"
         "After=network-online.target opencode.service\n\n"
@@ -384,6 +414,21 @@ def _install_missing_dependencies(missing: Dict[str, Dict[str, object]]) -> None
         print("You can continue setup, but runtime commands may fail until these are installed.")
 
 
+def _show_banner() -> None:
+    # Avoid noisy ANSI output in non-interactive contexts.
+    if not sys.stdout.isatty():
+        return
+    if shutil.which("npx") is None:
+        return
+
+    try:
+        subprocess.run(OPENBRIDGE_BANNER_CMD, check=False)
+    except Exception:
+        return
+
+    print("  Telegram <-> OpenCode Bridge  *  v1.0.0\n")
+
+
 def _install_opencode_systemd_unit(workspace_dir: Path) -> None:
     SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
     OPENCODE_SYSTEMD_UNIT_FILE.write_text(_build_opencode_systemd_unit(workspace_dir), encoding="utf-8")
@@ -392,7 +437,7 @@ def _install_opencode_systemd_unit(workspace_dir: Path) -> None:
 def _ensure_opencode_service(workspace_dir: Path) -> None:
     if not CONFIG_FILE.exists():
         print(f"Config not found: {CONFIG_FILE}")
-        print("Run: telewatch setup")
+        print("Run: openbridge setup")
         raise SystemExit(1)
 
     _install_opencode_systemd_unit(workspace_dir)
@@ -414,7 +459,7 @@ def _ensure_opencode_running() -> None:
 
     if not OPENCODE_SYSTEMD_UNIT_FILE.exists():
         raise FileNotFoundError(
-            f"OpenCode service unit not found at {OPENCODE_SYSTEMD_UNIT_FILE}. Run telewatch setup first."
+            f"OpenCode service unit not found at {OPENCODE_SYSTEMD_UNIT_FILE}. Run openbridge setup first."
         )
 
     status = subprocess.run(
@@ -566,7 +611,7 @@ def install_systemd_command(args: argparse.Namespace) -> None:
 
     if not CONFIG_FILE.exists():
         print(f"Config not found: {CONFIG_FILE}")
-        print("Run: telewatch setup")
+        print("Run: openbridge setup")
         raise SystemExit(1)
 
     SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
@@ -626,12 +671,13 @@ def uninstall_systemd_command(_: argparse.Namespace) -> None:
 
 
 def setup_command(_: argparse.Namespace) -> None:
+    _show_banner()
     print("Telegram OpenCode Bridge Setup")
     print("================================")
 
     _install_missing_dependencies(_missing_dependencies())
 
-    current = read_env_file(CONFIG_FILE)
+    current = _with_legacy_openbridge_aliases(read_env_file(CONFIG_FILE))
     config: Dict[str, str] = {}
 
     config["TELEGRAM_BOT_TOKEN"] = _prompt(
@@ -755,15 +801,15 @@ def setup_command(_: argparse.Namespace) -> None:
             )
             config[f"{prefix}_LITELLM_PORT"] = current.get(f"{prefix}_LITELLM_PORT", "8000")
 
-    configure_llm_role("TELEWATCH_INPUT_LLM", "input prompt enhancer")
-    configure_llm_role("TELEWATCH_OUTPUT_LLM", "output prettifier")
+    configure_llm_role("OPENBRIDGE_INPUT_LLM", "input prompt enhancer")
+    configure_llm_role("OPENBRIDGE_OUTPUT_LLM", "output prettifier")
 
     # Keep legacy decorator keys for backwards compatibility, but default them off in new setups.
-    config["TELEWATCH_DECORATOR_ENABLED"] = "0"
-    config["TELEWATCH_DECORATOR_API_KEY"] = ""
-    config["TELEWATCH_DECORATOR_MODEL"] = ""
-    config["TELEWATCH_DECORATOR_BASE_URL"] = ""
-    config["TELEWATCH_DECORATOR_TIMEOUT_SECONDS"] = "30"
+    config["OPENBRIDGE_DECORATOR_ENABLED"] = "0"
+    config["OPENBRIDGE_DECORATOR_API_KEY"] = ""
+    config["OPENBRIDGE_DECORATOR_MODEL"] = ""
+    config["OPENBRIDGE_DECORATOR_BASE_URL"] = ""
+    config["OPENBRIDGE_DECORATOR_TIMEOUT_SECONDS"] = "30"
 
     write_env_file(CONFIG_FILE, config)
     print(f"Saved configuration to {CONFIG_FILE}")
@@ -783,10 +829,11 @@ def setup_command(_: argparse.Namespace) -> None:
 
 
 def start_command(args: argparse.Namespace) -> None:
+    _show_banner()
     config_path = Path(args.config) if args.config else CONFIG_FILE
     if not config_path.exists():
         print(f"Config not found: {config_path}")
-        print("Run: telewatch setup")
+        print("Run: openbridge setup")
         raise SystemExit(1)
 
     overrides: Dict[str, str] = {}
@@ -841,20 +888,20 @@ def stop_command(args: argparse.Namespace) -> None:
 
         if force and shutil.which("pkill") is not None:
             result = subprocess.run(
-                ["pkill", "-f", "telewatch start.*--foreground"],
+                ["pkill", "-f", "openbridge start.*--foreground"],
                 check=False,
             )
             if result.returncode == 0:
-                print("Terminated foreground telewatch process(es)")
+                print("Terminated foreground openbridge process(es)")
                 return
             else:
                 print("No foreground process found with --force")
                 return
 
         print("No running background process found.")
-        print("If telewatch is running in foreground mode, stop it with Ctrl+C in that terminal.")
+        print("If openbridge is running in foreground mode, stop it with Ctrl+C in that terminal.")
         if shutil.which("pkill") is not None:
-            print("Or use: telewatch stop --force")
+            print("Or use: openbridge stop --force")
         return
 
     try:
@@ -876,7 +923,7 @@ def status_command(_: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="telewatch", description="Telegram OpenCode Bridge")
+    parser = argparse.ArgumentParser(prog="openbridge", description="Telegram OpenCode Bridge")
     subparsers = parser.add_subparsers(dest="command")
 
     setup_parser = subparsers.add_parser("setup", help="Run the setup wizard")
@@ -893,7 +940,7 @@ def build_parser() -> argparse.ArgumentParser:
     stop_parser.add_argument(
         "--force",
         action="store_true",
-        help="Force-terminate foreground processes (pkill -f 'telewatch start.*--foreground')",
+        help="Force-terminate foreground processes (pkill -f 'openbridge start.*--foreground')",
     )
     stop_parser.set_defaults(func=stop_command)
 

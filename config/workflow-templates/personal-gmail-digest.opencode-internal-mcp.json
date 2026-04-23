@@ -6,7 +6,7 @@
   "schedule": "cron:0 9 * * *",
   "targets": [123456789],
   "metadata": {
-    "owner": "telewatch",
+    "owner": "openbridge",
     "mode": "opencode_internal_mcp",
     "mcp_profile": "gws-arindam"
   },

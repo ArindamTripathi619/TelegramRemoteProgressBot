@@ -6,7 +6,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/DevCrewX/Projects/TelegramRemoteProgressBot
-EnvironmentFile=%h/.config/telewatch/bridge.env
+EnvironmentFile=%h/.config/openbridge/bridge.env
 ExecStart=opencode serve --hostname 127.0.0.1 --port 4096
 Restart=on-failure
 RestartSec=5

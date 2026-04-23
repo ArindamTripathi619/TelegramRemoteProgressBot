@@ -41,6 +41,8 @@ DEFAULT_LITELLM_PORT = 8000
 DEFAULT_LITELLM_MODEL = "groq-gpt-oss-mini"
 DEFAULT_OPENCODE_API_BASE_URL = "http://127.0.0.1:4096"
 DEFAULT_OPENCODE_API_TIMEOUT_SECONDS = 120
+LEGACY_ENV_PREFIX = "TELEWATCH_"
+CURRENT_ENV_PREFIX = "OPENBRIDGE_"
 SENSITIVE_LOG_PATTERNS = (
     re.compile(r"(https?://api\.telegram\.org/bot)(\d{6,12}:[A-Za-z0-9_-]+)(/)", re.IGNORECASE),
     re.compile(r"\b(\d{6,12}:[A-Za-z0-9_-]{20,})\b"),
@@ -83,6 +85,7 @@ class BridgeConfig:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, str]) -> "BridgeConfig":
+        mapping = _with_legacy_openbridge_aliases(mapping)
         token = mapping.get("TELEGRAM_BOT_TOKEN", "").strip()
         if not token:
             raise ValueError("Missing TELEGRAM_BOT_TOKEN")
@@ -144,7 +147,7 @@ class BridgeConfig:
             input_llm_base_url,
             input_llm_litellm_port,
             input_llm_timeout_seconds,
-        ) = _parse_llm_role_config(mapping, role="TELEWATCH_INPUT_LLM")
+        ) = _parse_llm_role_config(mapping, role="OPENBRIDGE_INPUT_LLM")
 
         (
             output_llm_enabled,
@@ -156,7 +159,7 @@ class BridgeConfig:
             output_llm_timeout_seconds,
         ) = _parse_llm_role_config(
             mapping,
-            role="TELEWATCH_OUTPUT_LLM",
+            role="OPENBRIDGE_OUTPUT_LLM",
             legacy_enabled=decorator_enabled,
             legacy_api_key=decorator_api_key,
             legacy_model=decorator_model,
@@ -207,6 +210,22 @@ def _parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _with_legacy_openbridge_aliases(mapping: Mapping[str, str]) -> dict[str, str]:
+    normalized = dict(mapping)
+    for key, value in mapping.items():
+        if not key.startswith(LEGACY_ENV_PREFIX):
+            continue
+
+        suffix = key[len(LEGACY_ENV_PREFIX) :]
+        current_key = f"{CURRENT_ENV_PREFIX}{suffix}"
+        current_value = str(normalized.get(current_key, "")).strip()
+        if current_value:
+            continue
+
+        normalized[current_key] = value
+    return normalized
+
+
 def _normalize_llm_provider(value: str) -> str:
     lowered = value.strip().lower()
     if lowered in {"api", "direct", "apikey", "api_key"}:
@@ -219,19 +238,19 @@ def _normalize_llm_provider(value: str) -> str:
 def _parse_legacy_decorator_config(
     mapping: Mapping[str, str],
 ) -> tuple[bool, Optional[str], Optional[str], Optional[str], int]:
-    decorator_api_key = mapping.get("TELEWATCH_DECORATOR_API_KEY", "").strip() or None
-    decorator_model = mapping.get("TELEWATCH_DECORATOR_MODEL", "").strip() or None
-    decorator_base_url = mapping.get("TELEWATCH_DECORATOR_BASE_URL", "").strip() or None
+    decorator_api_key = mapping.get("OPENBRIDGE_DECORATOR_API_KEY", "").strip() or None
+    decorator_model = mapping.get("OPENBRIDGE_DECORATOR_MODEL", "").strip() or None
+    decorator_base_url = mapping.get("OPENBRIDGE_DECORATOR_BASE_URL", "").strip() or None
     decorator_timeout_seconds = int(
-        mapping.get("TELEWATCH_DECORATOR_TIMEOUT_SECONDS", str(DEFAULT_DECORATOR_TIMEOUT_SECONDS))
+        mapping.get("OPENBRIDGE_DECORATOR_TIMEOUT_SECONDS", str(DEFAULT_DECORATOR_TIMEOUT_SECONDS))
     )
-    decorator_enabled = _parse_bool(mapping.get("TELEWATCH_DECORATOR_ENABLED", "0"))
+    decorator_enabled = _parse_bool(mapping.get("OPENBRIDGE_DECORATOR_ENABLED", "0"))
     if decorator_api_key and decorator_model and decorator_base_url:
         decorator_enabled = True
     if decorator_enabled and (not decorator_api_key or not decorator_model or not decorator_base_url):
         decorator_enabled = False
     if decorator_timeout_seconds <= 0:
-        raise ValueError("TELEWATCH_DECORATOR_TIMEOUT_SECONDS must be > 0")
+        raise ValueError("OPENBRIDGE_DECORATOR_TIMEOUT_SECONDS must be > 0")
     return (
         decorator_enabled,
         decorator_api_key,
@@ -259,7 +278,7 @@ def _parse_llm_role_config(
     litellm_port = int(mapping.get(f"{role}_LITELLM_PORT", str(DEFAULT_LITELLM_PORT)))
     timeout_seconds = int(mapping.get(f"{role}_TIMEOUT_SECONDS", str(DEFAULT_DECORATOR_TIMEOUT_SECONDS)))
 
-    if role == "TELEWATCH_OUTPUT_LLM":
+    if role == "OPENBRIDGE_OUTPUT_LLM":
         if not api_key:
             api_key = legacy_api_key
         if not model:
@@ -996,7 +1015,7 @@ class OpenCodeBridge:
             existing_text = "\n\nExisting workflow draft JSON:\n" + json.dumps(existing_draft, indent=2)
 
         authoring_prompt = (
-            "Convert the user's natural-language request into ONE workflow JSON object for TeleWatch. "
+            "Convert the user's natural-language request into ONE workflow JSON object for OpenBridge. "
             "Return JSON only with no markdown fences and no commentary.\n\n"
             "Required top-level fields:\n"
             "- id (snake_case)\n"

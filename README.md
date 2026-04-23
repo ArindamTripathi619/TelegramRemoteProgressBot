@@ -12,18 +12,28 @@ Minimal Telegram application that forwards messages to an OpenCode API server (`
 - Runtime observability via `/health` and `/stats`.
 - Telegram token redaction in logs.
 
+## Screenshots
+
+### OpenBridge CLI / TUI Startup
+
+![OpenBridge CLI startup](tui_screenshot.webp)
+
+### Telegram Chat Output
+
+![OpenBridge Telegram chat output](chat_screenshot.webp)
+
 ## Workflow Diagram
 
 ```mermaid
 flowchart TD
-  A[User runs telewatch setup] --> B[Wizard collects config]
-  B --> C[Write ~/.config/telewatch/bridge.env]
+  A[User runs openbridge setup] --> B[Wizard collects config]
+  B --> C[Write ~/.config/openbridge/bridge.env]
   C --> D{systemctl --user available}
   D -- yes --> E[Install or refresh opencode.service]
   E --> F[Enable and start opencode.service]
   D -- no --> G[Skip service automation]
 
-  H[User runs telewatch start] --> I[Load bridge.env]
+  H[User runs openbridge start] --> I[Load bridge.env]
   I --> J{systemctl --user available}
   J -- yes --> K{opencode.service unit exists}
   K -- no --> L[Install and start opencode.service]
@@ -53,7 +63,7 @@ sequenceDiagram
   autonumber
   actor User as Telegram User
   participant TG as Telegram Bot
-  participant Bridge as TeleWatch Bridge
+  participant Bridge as OpenBridge Bridge
   participant Sessions as In-Memory Chat Session Map
   participant OC as OpenCode API
 
@@ -87,9 +97,9 @@ sequenceDiagram
 
 ## End-to-End Flow
 
-1. `telewatch setup` runs an interactive wizard and writes `~/.config/telewatch/bridge.env`.
+1. `openbridge setup` runs an interactive wizard and writes `~/.config/openbridge/bridge.env`.
 2. If user systemd is available, setup installs or refreshes `opencode.service` and starts it.
-3. `telewatch start` loads config and ensures `opencode.service` is running before starting the bridge.
+3. `openbridge start` loads config and ensures `opencode.service` is running before starting the bridge.
 4. Telegram messages are validated against the optional chat allowlist.
 5. The bridge optionally rewrites prompts using the input LLM role.
 6. The bridge sends prompts to the OpenCode API session tied to that Telegram chat.
@@ -111,56 +121,56 @@ source .venv/bin/activate
 ./.venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
-2. Configure TeleWatch:
+2. Configure OpenBridge:
 
 ```bash
-telewatch setup
+openbridge setup
 ```
 
-`telewatch setup` writes the bridge config and installs the user OpenCode service from the same env file when `systemctl --user` is available.
+`openbridge setup` writes the bridge config and installs the user OpenCode service from the same env file when `systemctl --user` is available.
 
 3. Run the bot:
 
 ```bash
-telewatch start
+openbridge start
 ```
 
-`telewatch start` verifies that `opencode.service` is up before launching the Telegram bridge.
+`openbridge start` verifies that `opencode.service` is up before launching the Telegram bridge.
 
 For foreground debugging:
 
 ```bash
-telewatch start --foreground --debug
+openbridge start --foreground --debug
 ```
 
 ## Command Lifecycle
 
-`telewatch setup`:
+`openbridge setup`:
 
 - collects all config values
 - writes env file
 - installs and starts OpenCode user service when possible
 - optionally launches the bridge immediately
 
-`telewatch start`:
+`openbridge start`:
 
 - validates config and working directory
 - ensures OpenCode service is installed/running when user systemd is available
 - starts bridge in background by default, or foreground with `--foreground`
 
-`telewatch install-systemd`:
+`openbridge install-systemd`:
 
-- writes both `telewatch.service` and `opencode.service`
+- writes both `openbridge.service` and `opencode.service`
 - can enable and optionally start both services
 
-`telewatch uninstall-systemd`:
+`openbridge uninstall-systemd`:
 
 - disables both services
 - removes both unit files from user systemd directory
 
-`telewatch workflows`:
+`openbridge workflows`:
 
-- manages recurring automation definitions stored in `~/.config/telewatch/workflows.json`
+- manages recurring automation definitions stored in `~/.config/openbridge/workflows.json`
 - `init` writes a sample daily news workflow
 - `list` shows workflow status, schedule, and next run time
 - `status --id <workflow>` shows persisted state for one workflow
@@ -176,13 +186,13 @@ Phase-1 execution model for Google Workspace workflows:
 
 - use `opencode_prompt` + `telegram_send` to ship quickly
 - instruct OpenCode in the prompt to use the desired MCP profile internally (for example `gws-arindam` or `gws-kiit`)
-- keep scheduler/state/retries in TeleWatch
+- keep scheduler/state/retries in OpenBridge
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor User as Telegram User
-  participant Bot as TeleWatch Bot
+  participant Bot as OpenBridge Bot
   participant OC as OpenCode API
   participant WF as workflows.json
 
@@ -221,7 +231,7 @@ Template examples:
 
 ## Setup Wizard
 
-`telewatch setup` writes `~/.config/telewatch/bridge.env` and configures:
+`openbridge setup` writes `~/.config/openbridge/bridge.env` and configures:
 
 - preflight check for required CLI tools (`npm`, `npx`, `opencode`, `gws`, `gws-mcp-server`)
 - optional install prompt for missing dependencies
@@ -246,7 +256,7 @@ Reference files:
 - [config/opencode-bridge.env.example](config/opencode-bridge.env.example)
 - [config/example.yaml](config/example.yaml)
 - [config/opencode.service.example](config/opencode.service.example)
-- [config/telewatch.service.example](config/telewatch.service.example)
+- [config/openbridge.service.example](config/openbridge.service.example)
 
 ## Configuration Keys
 
@@ -271,12 +281,12 @@ OpenCode daemon automation:
 
 Optional LLM roles:
 
-- `TELEWATCH_INPUT_LLM_*`
-- `TELEWATCH_OUTPUT_LLM_*`
+- `OPENBRIDGE_INPUT_LLM_*`
+- `OPENBRIDGE_OUTPUT_LLM_*`
 
 Legacy compatibility:
 
-- `TELEWATCH_DECORATOR_*` (supported, but output role keys are preferred)
+- `OPENBRIDGE_DECORATOR_*` (supported, but output role keys are preferred)
 
 ## OpenCode API Auth
 
@@ -288,7 +298,7 @@ export OPENCODE_SERVER_PASSWORD="<strong-password>"
 opencode serve --hostname 127.0.0.1 --port 4096
 ```
 
-Then set matching values in `telewatch setup` for:
+Then set matching values in `openbridge setup` for:
 
 - `OPENCODE_API_USERNAME`
 - `OPENCODE_API_PASSWORD`
@@ -334,24 +344,24 @@ No direct `!gws`/`/gws` execution path exists in this architecture. Google Works
 
 ## Systemd (User Service)
 
-`telewatch setup` installs the OpenCode service automatically when `systemctl --user` is available.
+`openbridge setup` installs the OpenCode service automatically when `systemctl --user` is available.
 
-Install and start the TeleWatch bridge service:
+Install and start the OpenBridge bridge service:
 
 ```bash
-telewatch install-systemd --start
+openbridge install-systemd --start
 ```
 
 Install without enabling:
 
 ```bash
-telewatch install-systemd --no-enable
+openbridge install-systemd --no-enable
 ```
 
 Remove service:
 
 ```bash
-telewatch uninstall-systemd
+openbridge uninstall-systemd
 ```
 
 The OpenCode service is kept in [config/opencode.service.example](config/opencode.service.example) and is managed through the same user systemd directory.
@@ -359,26 +369,26 @@ The OpenCode service is kept in [config/opencode.service.example](config/opencod
 Effective unit placement:
 
 - `~/.config/systemd/user/opencode.service`
-- `~/.config/systemd/user/telewatch.service`
+- `~/.config/systemd/user/openbridge.service`
 
 ## Logging and Status
 
-- Log file: `~/.config/telewatch/telewatch.log`
+- Log file: `~/.config/openbridge/openbridge.log`
 - Token redaction is enabled for Telegram bot token patterns.
 - Local status commands:
 
 ```bash
-telewatch status
-telewatch stop
+openbridge status
+openbridge stop
 ```
 
 Useful user-systemd checks:
 
 ```bash
 systemctl --user status opencode.service
-systemctl --user status telewatch.service
+systemctl --user status openbridge.service
 journalctl --user -u opencode.service -n 100 --no-pager
-journalctl --user -u telewatch.service -n 100 --no-pager
+journalctl --user -u openbridge.service -n 100 --no-pager
 ```
 
 ## Testing
@@ -420,7 +430,7 @@ If upgrading from older branches:
 - Prompt execution now goes through OpenCode API sessions.
 - Legacy monitor/analyzer YAML workflows are removed from runtime.
 - Direct Telegram-side GWS command execution was removed.
-- `TELEWATCH_DECORATOR_*` variables are still accepted for compatibility, but `TELEWATCH_OUTPUT_LLM_*` is preferred.
+- `OPENBRIDGE_DECORATOR_*` variables are still accepted for compatibility, but `OPENBRIDGE_OUTPUT_LLM_*` is preferred.
 - OpenCode context is kept per Telegram chat within the running bridge process, but it is not persisted across restarts.
 
 ## Notes

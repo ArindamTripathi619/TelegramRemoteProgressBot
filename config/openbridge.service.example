@@ -1,5 +1,5 @@
 [Unit]
-Description=TeleWatch Telegram OpenCode Bridge
+Description=OpenBridge Telegram OpenCode Bridge
 Wants=network-online.target
 Wants=opencode.service
 After=network-online.target opencode.service
@@ -7,8 +7,8 @@ After=network-online.target opencode.service
 [Service]
 Type=simple
 WorkingDirectory=/home/DevCrewX/Projects/TelegramRemoteProgressBot
-EnvironmentFile=%h/.config/telewatch/bridge.env
-ExecStart=/home/DevCrewX/Projects/TelegramRemoteProgressBot/.venv/bin/telewatch start --foreground
+EnvironmentFile=%h/.config/openbridge/bridge.env
+ExecStart=/home/DevCrewX/Projects/TelegramRemoteProgressBot/.venv/bin/openbridge start --foreground
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=60

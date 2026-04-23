@@ -7,7 +7,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="telewatch",
+    name="openbridge",
     version="0.1.0",
     author="DevCrewX",
     license="MIT",
@@ -31,8 +31,8 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "telewatch=telewatch.app:main",
-            "telewatch-opencode-bridge=telewatch.opencode_bridge:main",
+            "openbridge=openbridge.app:main",
+            "openbridge-opencode-bridge=openbridge.opencode_bridge:main",
         ],
     },
 )

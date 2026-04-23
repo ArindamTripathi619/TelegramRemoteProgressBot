@@ -20,10 +20,10 @@ from xml.etree import ElementTree as ET
 
 from .opencode_bridge import BridgeConfig
 
-logger = logging.getLogger("telewatch.workflows")
+logger = logging.getLogger("openbridge.workflows")
 
-DEFAULT_WORKFLOWS_FILE = Path.home() / ".config" / "telewatch" / "workflows.json"
-DEFAULT_WORKFLOWS_STATE_FILE = Path.home() / ".config" / "telewatch" / "workflows-state.json"
+DEFAULT_WORKFLOWS_FILE = Path.home() / ".config" / "openbridge" / "workflows.json"
+DEFAULT_WORKFLOWS_STATE_FILE = Path.home() / ".config" / "openbridge" / "workflows-state.json"
 DEFAULT_WORKFLOW_LOOP_INTERVAL_SECONDS = 30
 DEFAULT_WORKFLOW_TIMEZONE = "local"
 

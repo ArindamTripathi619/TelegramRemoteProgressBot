@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.telewatch.opencode_bridge import (
+from src.openbridge.opencode_bridge import (
     BridgeConfig,
     OpenCodeBridge,
     _chunk_message,
