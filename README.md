@@ -108,6 +108,7 @@ Session behavior:
 cd /home/DevCrewX/Projects/TelegramRemoteProgressBot
 source .venv/bin/activate
 ./.venv/bin/python -m pip install -e .
+./.venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
 2. Configure TeleWatch:
@@ -221,6 +222,9 @@ Template examples:
 ## Setup Wizard
 
 `telewatch setup` writes `~/.config/telewatch/bridge.env` and configures:
+
+- preflight check for required CLI tools (`npm`, `npx`, `opencode`, `gws`, `gws-mcp-server`)
+- optional install prompt for missing dependencies
 
 - Telegram bot token
 - OpenCode model and working directory
@@ -378,6 +382,32 @@ journalctl --user -u telewatch.service -n 100 --no-pager
 ```
 
 ## Testing
+
+Canonical test command (local and CI):
+
+```bash
+python -m pytest -q
+```
+
+## Build Artifacts
+
+```bash
+python -m build --sdist --wheel
+```
+
+## Deployment Preflight
+
+Run one command to install dev tooling, run canonical tests, and verify package builds:
+
+```bash
+./scripts/preflight.sh
+```
+
+The script uses `python -m pip`, `python -m pytest`, and `python -m build` to avoid interpreter drift.
+
+## Legacy unittest Command
+
+Existing tests are `unittest`-compatible and can still be run directly when needed:
 
 ```bash
 ./.venv/bin/python -m unittest discover -s tests -p 'test_*.py'

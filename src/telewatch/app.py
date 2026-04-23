@@ -38,6 +38,34 @@ OPENCODE_SYSTEMD_UNIT_FILE = SYSTEMD_USER_DIR / OPENCODE_SYSTEMD_UNIT_NAME
 WORKFLOWS_FILE = DEFAULT_WORKFLOWS_FILE
 WORKFLOWS_STATE_FILE = DEFAULT_WORKFLOWS_STATE_FILE
 
+REQUIRED_DEPENDENCIES = {
+    "npm": {
+        "binary": "npm",
+        "install_commands": [],
+        "manual_hint": "Install Node.js/npm from your OS package manager or nodejs.org.",
+    },
+    "npx": {
+        "binary": "npx",
+        "install_commands": [],
+        "manual_hint": "Install Node.js/npm from your OS package manager or nodejs.org.",
+    },
+    "opencode": {
+        "binary": "opencode",
+        "install_commands": [["npm", "install", "-g", "opencode"]],
+        "manual_hint": "Install OpenCode CLI manually if your environment uses a different package name.",
+    },
+    "@googleworkspace/cli": {
+        "binary": "gws",
+        "install_commands": [["npm", "install", "-g", "@googleworkspace/cli"]],
+        "manual_hint": "Install the Google Workspace CLI manually and ensure `gws` is on PATH.",
+    },
+    "gws-mcp-server": {
+        "binary": "gws-mcp-server",
+        "install_commands": [["npm", "install", "-g", "gws-mcp-server"]],
+        "manual_hint": "Install gws-mcp-server manually and ensure it is on PATH.",
+    },
+}
+
 CONFIG_KEYS = [
     "TELEGRAM_BOT_TOKEN",
     "OPENCODE_MODEL",
@@ -291,6 +319,71 @@ def _systemctl(*args: str, check: bool = True) -> None:
     subprocess.run(["systemctl", "--user", *args], check=check)
 
 
+def _missing_dependencies() -> Dict[str, Dict[str, object]]:
+    missing: Dict[str, Dict[str, object]] = {}
+    for name, spec in REQUIRED_DEPENDENCIES.items():
+        binary = str(spec["binary"])
+        if shutil.which(binary) is None:
+            missing[name] = spec
+    return missing
+
+
+def _install_missing_dependencies(missing: Dict[str, Dict[str, object]]) -> None:
+    if not missing:
+        return
+
+    print("Checking required runtime dependencies...")
+    print("Missing dependencies:")
+    for name, spec in missing.items():
+        print(f"- {name} (binary: {spec['binary']})")
+
+    install_now = _prompt("Install missing dependencies now? [Y/n]", "Y").lower()
+    if install_now not in {"", "y", "yes"}:
+        print("Skipping dependency installation. Setup will continue.")
+        return
+
+    for name, spec in missing.items():
+        install_commands = spec.get("install_commands", [])
+        if not isinstance(install_commands, list) or not install_commands:
+            print(f"Could not auto-install {name}: {spec.get('manual_hint', 'Install manually.')}")
+            continue
+
+        if shutil.which("npm") is None:
+            print(f"Could not auto-install {name}: npm is not available.")
+            print(str(spec.get("manual_hint", "Install manually.")))
+            continue
+
+        installed = False
+        for command in install_commands:
+            if not isinstance(command, list) or not command:
+                continue
+
+            rendered = " ".join(command)
+            print(f"Installing {name}: {rendered}")
+            try:
+                subprocess.run(command, check=True)
+            except Exception as exc:
+                print(f"Install command failed for {name}: {exc}")
+                continue
+
+            binary = str(spec["binary"])
+            if shutil.which(binary) is not None:
+                installed = True
+                print(f"Installed {name} successfully.")
+                break
+
+        if not installed:
+            print(f"Could not verify installation for {name}.")
+            print(str(spec.get("manual_hint", "Install manually.")))
+
+    remaining = _missing_dependencies()
+    if remaining:
+        print("Some required dependencies are still missing:")
+        for dep in remaining:
+            print(f"- {dep}")
+        print("You can continue setup, but runtime commands may fail until these are installed.")
+
+
 def _install_opencode_systemd_unit(workspace_dir: Path) -> None:
     SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
     OPENCODE_SYSTEMD_UNIT_FILE.write_text(_build_opencode_systemd_unit(workspace_dir), encoding="utf-8")
@@ -535,6 +628,8 @@ def uninstall_systemd_command(_: argparse.Namespace) -> None:
 def setup_command(_: argparse.Namespace) -> None:
     print("Telegram OpenCode Bridge Setup")
     print("================================")
+
+    _install_missing_dependencies(_missing_dependencies())
 
     current = read_env_file(CONFIG_FILE)
     config: Dict[str, str] = {}

@@ -10,7 +10,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.telewatch.app import (
     _build_opencode_systemd_unit,
     _build_systemd_unit,
+    _install_missing_dependencies,
     _merged_config,
+    _missing_dependencies,
     read_env_file,
     write_env_file,
 )
@@ -324,6 +326,53 @@ class TestAppConfig(unittest.TestCase):
                     ["pkill", "-f", "telewatch start.*--foreground"],
                 ],
             )
+
+    def test_missing_dependencies_detects_absent_binaries(self):
+        def which_side_effect(binary):
+            if binary in {"npm", "npx"}:
+                return f"/usr/bin/{binary}"
+            return None
+
+        with patch("src.telewatch.app.shutil.which", side_effect=which_side_effect):
+            missing = _missing_dependencies()
+
+        self.assertIn("opencode", missing)
+        self.assertIn("@googleworkspace/cli", missing)
+        self.assertIn("gws-mcp-server", missing)
+        self.assertNotIn("npm", missing)
+        self.assertNotIn("npx", missing)
+
+    def test_install_missing_dependencies_runs_npm_installs_when_approved(self):
+        missing = {
+            "@googleworkspace/cli": {
+                "binary": "gws",
+                "install_commands": [["npm", "install", "-g", "@googleworkspace/cli"]],
+                "manual_hint": "manual",
+            },
+            "gws-mcp-server": {
+                "binary": "gws-mcp-server",
+                "install_commands": [["npm", "install", "-g", "gws-mcp-server"]],
+                "manual_hint": "manual",
+            },
+        }
+
+        def which_side_effect(binary):
+            if binary == "npm":
+                return "/usr/bin/npm"
+            return None
+
+        with patch("src.telewatch.app._prompt", return_value="y"), patch(
+            "src.telewatch.app.shutil.which", side_effect=which_side_effect
+        ), patch("src.telewatch.app.subprocess.run") as mock_run, patch("builtins.print"):
+            _install_missing_dependencies(missing)
+
+        self.assertEqual(
+            [call.args[0] for call in mock_run.call_args_list],
+            [
+                ["npm", "install", "-g", "@googleworkspace/cli"],
+                ["npm", "install", "-g", "gws-mcp-server"],
+            ],
+        )
 
 
 if __name__ == "__main__":
