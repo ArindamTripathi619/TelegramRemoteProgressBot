@@ -11,7 +11,7 @@ if [[ ! -x "${ROOT_DIR}/.venv/bin/python" ]]; then
   exit 1
 fi
 
-"${ROOT_DIR}/.venv/bin/python" -m nuitka \
+PYTHONPATH="${ROOT_DIR}/src:${PYTHONPATH:-}" "${ROOT_DIR}/.venv/bin/python" -m nuitka \
   --onefile \
   --assume-yes-for-downloads \
   --enable-plugin=pylint-warnings \
@@ -21,6 +21,6 @@ fi
   --include-data-files="${ROOT_DIR}/config/openbridge.service.example=config/openbridge.service.example" \
   --output-dir="${OUT_DIR}" \
   --output-filename="openbridge" \
-  "${ROOT_DIR}/src/openbridge/app.py"
+  "${ROOT_DIR}/scripts/openbridge_nuitka_entry.py"
 
 echo "Nuitka build complete: ${OUT_DIR}/openbridge"
