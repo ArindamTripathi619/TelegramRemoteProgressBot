@@ -547,16 +547,13 @@ class OpenCodeBridge:
 
     def _send_session_message_sync(self, session_id: str, prompt: str) -> Optional[str]:
         encoded_session = quote(session_id, safe="")
+        # OpenCode currently expects message parts with a typed text object.
+        # Avoid broad fallback payloads that can mask the real upstream error.
         payload_variants = [
             {"parts": [{"type": "text", "text": prompt}]},
-            {"parts": [{"text": prompt}]},
-            {"parts": [prompt]},
-            {"content": prompt},
-            {"message": prompt},
-            {"text": prompt},
         ]
 
-        last_error: Optional[Exception] = None
+        first_error: Optional[Exception] = None
         for payload in payload_variants:
             try:
                 response = self._opencode_request_sync(
@@ -569,10 +566,15 @@ class OpenCodeBridge:
                     return candidates[-1]
                 return None
             except Exception as exc:
-                last_error = exc
+                if first_error is None:
+                    first_error = exc
+                # Timeout should surface immediately; retrying with a different
+                # payload shape turns a timeout into misleading schema errors.
+                if "timeout" in str(exc).lower():
+                    raise exc
 
-        if last_error is not None:
-            raise last_error
+        if first_error is not None:
+            raise first_error
         return None
 
     def _fetch_session_messages_sync(self, session_id: str) -> object:
