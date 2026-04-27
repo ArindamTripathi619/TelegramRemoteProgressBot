@@ -19,7 +19,9 @@ from src.openbridge.opencode_bridge import (
     _extract_session_id,
     _extract_text_candidates,
     _redact_sensitive_text,
+    _find_markdown_safe_split_index,
 )
+
 
 
 class TestOpenCodeBridgeHelpers(unittest.TestCase):
@@ -140,6 +142,38 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
         self.assertTrue(all(len(chunk) <= 3000 for chunk in chunks))
         self.assertEqual("".join(chunks), text)
 
+    def test_chunk_message_keeps_code_fence_intact(self):
+        text = (
+            "intro\n\n"
+            "```python\n"
+            + ("print('hello')\n" * 260)
+            + "```\n\n"
+            "outro\n"
+        )
+        chunks = list(_chunk_message(text, limit=500))
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(chunk.count("```") % 2 == 0 for chunk in chunks))
+        self.assertEqual("".join(chunks), text)
+
+    def test_chunk_message_prefers_section_boundaries(self):
+        text = "A" * 260 + "\n\n*Section Two*\n" + "B" * 260
+        chunks = list(_chunk_message(text, limit=300))
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(chunks[0].endswith("\n\n"))
+        self.assertTrue(chunks[1].startswith("*Section Two*"))
+        self.assertEqual("".join(chunks), text)
+
+    def test_find_markdown_safe_split_index_avoids_fence_boundary(self):
+        text = "before\n```\nline 1\nline 2\n```\nafter\n"
+        split_index = _find_markdown_safe_split_index(text, 18)
+
+        self.assertNotEqual(split_index, 18)
+        self.assertGreater(split_index, 0)
+        self.assertLess(split_index, len(text))
+        self.assertEqual(text[:split_index] + text[split_index:], text)
+
     def test_run_prompt_handles_api_failure(self):
         config = BridgeConfig(
             telegram_token="123:token",
@@ -203,7 +237,7 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(captured_payloads[0], {"parts": [{"type": "text", "text": "Hello"}]})
 
-    def test_send_result_messages_sends_escaped_markdown_for_raw_output(self):
+    def test_send_result_messages_sends_markdown_for_raw_output(self):
         config = BridgeConfig(
             telegram_token="123:token",
             opencode_model="opencode/big-pickle",
@@ -233,6 +267,23 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
         escaped = _escape_markdown_v2(value)
 
         self.assertEqual(escaped, "a\\.b\\! `x.y!`\\n```text\\nq.w!\\n``` and \\\\")
+
+    def test_escape_markdown_v2_preserves_formatting_when_requested(self):
+        value = "*Bold Text* [Link](https://telegram.org/) and wow!"
+
+        escaped = _escape_markdown_v2(value, preserve_formatting=True)
+
+        self.assertEqual(escaped, "*Bold Text* [Link](https://telegram\\.org/) and wow\\!")
+
+    def test_escape_markdown_v2_escapes_dot_inside_italic(self):
+        value = "_U.S. updates_ and end."
+
+        escaped = _escape_markdown_v2(value, preserve_formatting=True)
+
+        self.assertEqual(escaped, "_U\\.S\\. updates_ and end\\.")
+
+
+
 
     def test_extract_text_candidates_from_parts_payload(self):
         payload = {

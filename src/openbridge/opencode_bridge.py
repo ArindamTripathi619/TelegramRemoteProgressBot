@@ -23,7 +23,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.constants import ChatAction
 from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -31,7 +31,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 logger = logging.getLogger("opencode_bridge")
 
 TELEGRAM_LIMIT = 4096
-SAFE_CHUNK = 3900
+SAFE_CHUNK = TELEGRAM_LIMIT
 DEFAULT_FALLBACK_MODELS = (
     "opencode/minimax-m2.5-free",
     "opencode/nemotron-3-super-free",
@@ -54,33 +54,72 @@ SENSITIVE_LOG_PATTERNS = (
 )
 
 MDV2_SPECIAL_CHARS = r"_*[]()~`>#+-=|{}.!"
+MDV2_LITERAL_SPECIAL_CHARS = r">#+-={}.!"
 MDV2_CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```|`[^`\n]*`)")
+MDV2_ENTITY_PATTERN = re.compile(
+    r"\*[^\*\n]+\*|"
+    r"_[^_\n]+_|"
+    r"\[[^\]]*\]\([^\)]*\)"
+)
+MDV2_MAX_FALLBACK_DEPTH = 4
+MDV2_STRICT_FALLBACK_THRESHOLD = 400
 
 
-def _escape_markdown_v2(text: str) -> str:
+def _escape_markdown_v2(text: str, *, preserve_formatting: bool = False) -> str:
     text = str(text)
+    special_chars = MDV2_SPECIAL_CHARS
 
-    def _escape_plain_segment(segment: str) -> str:
+    def _escape_chars(raw: str, chars: str = MDV2_SPECIAL_CHARS) -> str:
         escaped: List[str] = []
         i = 0
-        while i < len(segment):
-            ch = segment[i]
+        while i < len(raw):
+            ch = raw[i]
             if ch == "\\":
-                if i + 1 < len(segment) and segment[i + 1] in ("n", "\\", *MDV2_SPECIAL_CHARS):
+                if i + 1 < len(raw) and raw[i + 1] in ("n", "\\", *MDV2_SPECIAL_CHARS):
                     escaped.append("\\")
-                    escaped.append(segment[i + 1])
+                    escaped.append(raw[i + 1])
                     i += 2
                     continue
                 escaped.append("\\\\")
                 i += 1
                 continue
 
-            if ch in MDV2_SPECIAL_CHARS:
+            if ch in chars:
                 escaped.append("\\")
             escaped.append(ch)
             i += 1
-
         return "".join(escaped)
+
+    def _escape_plain_segment(segment: str) -> str:
+        if not preserve_formatting:
+            return _escape_chars(segment, special_chars)
+
+        placeholders: dict[str, str] = {}
+        protected = segment
+        for i, match in enumerate(MDV2_ENTITY_PATTERN.finditer(segment)):
+            entity = match.group(0)
+            token = f"MDV2ENTITY{i}END"
+            if entity.startswith("["):
+                parts = entity.split("](", 1)
+                if len(parts) == 2:
+                    label = parts[0][1:]
+                    url_and_close = parts[1]
+                    if url_and_close.endswith(")"):
+                        url = url_and_close[:-1]
+                        escaped_label = _escape_chars(label, special_chars)
+                        escaped_url = _escape_chars(url, special_chars)
+                        entity = "[" + escaped_label + "](" + escaped_url + ")"
+            elif entity.startswith("*") and entity.endswith("*"):
+                entity = "*" + _escape_chars(entity[1:-1], special_chars) + "*"
+            elif entity.startswith("_") and entity.endswith("_"):
+                entity = "_" + _escape_chars(entity[1:-1], special_chars) + "_"
+            placeholders[token] = entity
+            protected = protected.replace(match.group(0), token, 1)
+
+        output_segment = _escape_chars(protected, special_chars)
+        for token, original in placeholders.items():
+            output_segment = output_segment.replace(token, original)
+        return output_segment
 
     output: List[str] = []
     last_end = 0
@@ -387,17 +426,70 @@ def _chunk_message(text: str, limit: int = SAFE_CHUNK) -> Iterable[str]:
 
     start = 0
     while start < len(text):
-        end = min(start + limit, len(text))
-        chunk = text[start:end]
+        remaining = text[start:]
+        if len(remaining) <= limit:
+            yield remaining if remaining.strip() else "(empty)"
+            return
 
-        if end < len(text):
-            split = chunk.rfind("\n")
-            if split > 100:
-                end = start + split
-                chunk = text[start:end]
+        split = _find_section_split_index(remaining, limit)
+        if split <= 0:
+            split = _find_markdown_safe_split_index(remaining, limit)
+        if split <= 0 or split >= len(remaining):
+            split = limit
 
-        yield chunk.strip() or "(empty)"
-        start = end
+        chunk = remaining[:split]
+        yield chunk if chunk.strip() else "(empty)"
+        start += split
+
+
+def _find_markdown_safe_split_index(text: str, target: int) -> int:
+    if target <= 0 or target >= len(text):
+        return min(max(target, 0), len(text))
+
+    inside_fence = False
+    safe_before_target = -1
+    safe_after_target = -1
+    index = 0
+
+    for line in text.splitlines(keepends=True):
+        line_end = index + len(line)
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            inside_fence = not inside_fence
+
+        if not inside_fence:
+            if line_end <= target:
+                safe_before_target = line_end
+            elif safe_after_target == -1:
+                safe_after_target = line_end
+
+        index = line_end
+
+    if safe_before_target != -1:
+        return safe_before_target
+    if safe_after_target != -1 and safe_after_target < len(text):
+        return safe_after_target
+    return target
+
+
+def _find_section_split_index(text: str, target: int) -> int:
+    if target <= 0 or target >= len(text):
+        return min(max(target, 0), len(text))
+
+    candidates: List[int] = []
+    for marker in ("\n\n*", "\n\n•", "\n\n- ", "\n\n"):
+        index = text.rfind(marker, 0, target)
+        if index > 100:
+            candidates.append(index + 2)
+
+    if not candidates:
+        return -1
+
+    split = max(candidates)
+    # Do not split in the middle of a fenced code block.
+    if text[:split].count("```") % 2 != 0:
+        return -1
+    return split
 
 
 def _extract_session_id(payload: object) -> Optional[str]:
@@ -1518,6 +1610,14 @@ class OpenCodeBridge:
                     logger.error("Failed to send empty prompt warning to chat %s: %s", chat_id, reply_exc)
                 return
 
+            logger.info(
+                "Received prompt chat=%s update_id=%s message_id=%s len=%d",
+                chat_id,
+                getattr(update, "update_id", None),
+                getattr(update.effective_message, "message_id", None),
+                len(prompt),
+            )
+
             if chat_id in self._pending_workflow_drafts:
                 try:
                     reply = await self._handle_pending_workflow_reply(chat_id, prompt, context.application)
@@ -1539,6 +1639,7 @@ class OpenCodeBridge:
                 await update.effective_message.reply_text("Request received. Sending to OpenCode API...")
             except Exception as reply_exc:
                 logger.error("Failed to send ACK message to chat %s: %s", chat_id, reply_exc)
+            logger.info("Queued prompt task for chat=%s", chat_id)
             asyncio.create_task(self._run_and_respond(chat_id, prompt, context.application))
         except Exception as exc:
             logger.exception("Unexpected error in handle_text")
@@ -1562,9 +1663,10 @@ class OpenCodeBridge:
                 if len(chunk) > TELEGRAM_LIMIT:
                     chunk = chunk[:TELEGRAM_LIMIT]
                 try:
+                    escaped_chunk = _escape_markdown_v2(chunk, preserve_formatting=True)
                     await app.bot.send_message(
                         chat_id=chat_id,
-                        text=_escape_markdown_v2(chunk),
+                        text=escaped_chunk,
                         parse_mode="MarkdownV2",
                     )
                 except Exception as send_exc:
@@ -1577,13 +1679,19 @@ class OpenCodeBridge:
             except Exception as notify_exc:
                 logger.error("Could not notify user of delivery failure: %s", notify_exc)
 
+
+
     async def _run_and_respond(self, chat_id: int, prompt: str, app: Application) -> None:
+        started_at = time.perf_counter()
         try:
+            logger.info("Starting prompt execution for chat=%s", chat_id)
             async with self._semaphore:
                 await app.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
                 improved_prompt = await self.enhance_prompt(prompt)
                 result = await self.run_prompt(chat_id, improved_prompt)
             await self._send_result_messages(chat_id, result, app)
+            elapsed = time.perf_counter() - started_at
+            logger.info("Completed prompt execution for chat=%s in %.2fs", chat_id, elapsed)
 
         except Exception as exc:  # broad guard to avoid silent task failures
             logger.exception("Failed to run OpenCode prompt")
@@ -1629,7 +1737,21 @@ def build_application(config: BridgeConfig, *, bridge: Optional[OpenCodeBridge] 
         bridge.set_workflow_stats_provider(workflow_manager.stats_lines)
         bridge.set_workflow_manager(workflow_manager)
 
+    commands = [
+        BotCommand("start", "Start the bot"),
+        BotCommand("help", "Show usage help"),
+        BotCommand("health", "Show runtime health"),
+        BotCommand("stats", "Show request stats"),
+        BotCommand("workflow", "Manage workflows"),
+    ]
+
     async def _post_init(application: Application) -> None:
+        try:
+            await application.bot.set_my_commands(commands)
+            logger.info("Published %d Telegram commands", len(commands))
+        except Exception:
+            logger.exception("Failed to publish Telegram command menu")
+
         if workflow_manager is not None:
             try:
                 logger.info("Starting workflow manager...")
