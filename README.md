@@ -143,6 +143,17 @@ For foreground debugging:
 openbridge start --foreground --debug
 ```
 
+## Local Precheck (Same Gate As CI)
+
+Run this before pushing changes:
+
+```bash
+PYTHON_BIN=./.venv/bin/python bash scripts/preflight.sh
+```
+
+This command installs dev dependencies and runs lint (`flake8` with complexity threshold), type checks (`mypy`), tests, and package build checks.
+Current static gates target core control-flow paths in `src/openbridge/app.py` and `src/openbridge/workflows.py`, plus type checks on `src/openbridge/workflows.py`.
+
 ## Install From Release Artifacts (Linux)
 
 If you do not want to clone this repository, you can install OpenBridge directly from the GitHub release artifacts.
