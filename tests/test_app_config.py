@@ -423,13 +423,9 @@ class TestAppConfig(unittest.TestCase):
 
             with patch.object(app_module, "SYSTEMD_UNIT_FILE", unit_file), patch.object(
                 app_module, "OPENCODE_SYSTEMD_UNIT_FILE", opencode_unit_file
-            ), patch.object(
-                app_module, "SYSTEMD_UNIT_NAME", "openbridge.service"
-            ), patch.object(
-                app_module, "OPENCODE_SYSTEMD_UNIT_NAME", "opencode.service"
-            ), patch.object(app_module.shutil, "which", return_value="/bin/systemctl"), patch.object(
-                app_module.subprocess, "run"
-            ) as mock_run:
+            ), patch.object(app_module, "SYSTEMD_UNIT_NAME", "openbridge.service"), patch.object(
+                app_module.shutil, "which", return_value="/bin/systemctl"
+            ), patch.object(app_module.subprocess, "run") as mock_run:
                 app_module.uninstall_systemd_command(Mock())
 
                 self.assertFalse(unit_file.exists())
@@ -438,12 +434,11 @@ class TestAppConfig(unittest.TestCase):
                     [call.args[0] for call in mock_run.call_args_list],
                     [
                         ["systemctl", "--user", "disable", "openbridge.service"],
-                        ["systemctl", "--user", "disable", "opencode.service"],
                         ["systemctl", "--user", "daemon-reload"],
                     ],
                 )
 
-    def test_start_command_runs_opencode_preflight(self):
+    def test_start_command_does_not_manage_opencode_lifecycle(self):
         from src.openbridge import app as app_module
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -463,14 +458,11 @@ class TestAppConfig(unittest.TestCase):
                 },
             )
 
-            with patch.object(app_module.shutil, "which", return_value="/bin/systemctl"), patch.object(
-                app_module, "OPENCODE_SYSTEMD_UNIT_FILE", Path(temp_dir) / "opencode.service"
-            ), patch.object(app_module, "_ensure_opencode_service") as mock_ensure_service, patch.object(
+            with patch.object(app_module.shutil, "which", side_effect=lambda cmd: "/bin/systemctl" if cmd == "systemctl" else None), patch.object(
                 app_module, "run_bridge"
             ) as mock_run_bridge:
                 app_module.start_command(Mock(config=config_path, foreground=True, debug=False, log_level=None))
 
-                mock_ensure_service.assert_called_once()
                 mock_run_bridge.assert_called_once()
 
     def test_workflows_init_warns_on_placeholder_targets(self):

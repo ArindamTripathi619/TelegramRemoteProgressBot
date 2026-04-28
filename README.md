@@ -436,6 +436,8 @@ Install without enabling:
 openbridge install-systemd --no-enable
 ```
 
+The bridge service is the lifecycle owner. Its systemd unit pulls in `opencode.service` as a dependency, so startup and shutdown are managed through `openbridge.service` rather than by controlling `opencode.service` directly.
+
 ## Binary Build (Nuitka)
 
 Build a standalone binary with Nuitka:

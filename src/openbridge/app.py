@@ -554,33 +554,12 @@ def _ensure_opencode_service(workspace_dir: Path, config_path: Path = CONFIG_FIL
     _install_opencode_systemd_unit(workspace_dir)
 
     if shutil.which("systemctl") is None:
-        print("systemctl not found; cannot manage the OpenCode service automatically.")
+        print("systemctl not found; wrote the OpenCode service unit for manual management.")
         print(f"Wrote {OPENCODE_SYSTEMD_UNIT_FILE}")
         return
 
     _systemctl("daemon-reload")
-    _systemctl("enable", OPENCODE_SYSTEMD_UNIT_NAME, check=False)
-    _systemctl("start", OPENCODE_SYSTEMD_UNIT_NAME)
-    print(f"Started {OPENCODE_SYSTEMD_UNIT_NAME}")
-
-
-def _ensure_opencode_running() -> None:
-    if shutil.which("systemctl") is None:
-        return
-
-    if not OPENCODE_SYSTEMD_UNIT_FILE.exists():
-        raise FileNotFoundError(
-            f"OpenCode service unit not found at {OPENCODE_SYSTEMD_UNIT_FILE}. Run openbridge setup first."
-        )
-
-    status = subprocess.run(
-        ["systemctl", "--user", "is-active", "--quiet", OPENCODE_SYSTEMD_UNIT_NAME],
-        check=False,
-    )
-    if status.returncode == 0:
-        return
-
-    _systemctl("start", OPENCODE_SYSTEMD_UNIT_NAME)
+    print(f"Wrote {OPENCODE_SYSTEMD_UNIT_FILE}")
 
 
 def _workflow_config_from_args(args: argparse.Namespace) -> BridgeConfig:
@@ -762,11 +741,8 @@ def install_systemd_command(args: argparse.Namespace) -> None:
 
     commands = [["systemctl", "--user", "daemon-reload"]]
     if not getattr(args, "no_enable", False):
-        commands.append(["systemctl", "--user", "enable", OPENCODE_SYSTEMD_UNIT_NAME])
-    if not getattr(args, "no_enable", False):
         commands.append(["systemctl", "--user", "enable", SYSTEMD_UNIT_NAME])
     if getattr(args, "start", False):
-        commands.append(["systemctl", "--user", "restart", OPENCODE_SYSTEMD_UNIT_NAME])
         commands.append(["systemctl", "--user", "restart", SYSTEMD_UNIT_NAME])
 
     for command in commands:
@@ -785,7 +761,6 @@ def uninstall_systemd_command(_: argparse.Namespace) -> None:
     opencode_unit_exists = OPENCODE_SYSTEMD_UNIT_FILE.exists()
     if shutil.which("systemctl") is not None:
         subprocess.run(["systemctl", "--user", "disable", SYSTEMD_UNIT_NAME], check=False)
-        subprocess.run(["systemctl", "--user", "disable", OPENCODE_SYSTEMD_UNIT_NAME], check=False)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
 
     if unit_exists:
@@ -958,7 +933,7 @@ def setup_command(_: argparse.Namespace) -> None:
         try:
             _ensure_opencode_service(workspace_dir)
         except Exception as exc:
-            print(f"Could not install or start the OpenCode systemd service: {exc}")
+            print(f"Could not install the OpenCode systemd service: {exc}")
     else:
         print("systemctl not found; OpenCode service was not installed automatically.")
 
@@ -988,16 +963,7 @@ def start_command(args: argparse.Namespace) -> None:
         print(f"OpenCode working dir does not exist: {config.opencode_working_dir}")
         raise SystemExit(1)
 
-    if shutil.which("systemctl") is not None:
-        try:
-            if not OPENCODE_SYSTEMD_UNIT_FILE.exists():
-                _ensure_opencode_service(Path(config.opencode_working_dir).resolve(), config_path=config_path)
-            else:
-                _ensure_opencode_running()
-        except Exception as exc:
-            print(f"Could not install or start OpenCode service: {exc}")
-            raise SystemExit(1)
-    else:
+    if shutil.which("systemctl") is None:
         print("systemctl not found; assuming OpenCode server is already running.")
 
     foreground = getattr(args, "foreground", False)
