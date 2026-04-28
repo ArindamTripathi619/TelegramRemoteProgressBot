@@ -148,10 +148,18 @@ openbridge start --foreground --debug
 Run this before pushing changes:
 
 ```bash
-PYTHON_BIN=./.venv/bin/python bash scripts/preflight.sh
+bash scripts/preflight.sh
 ```
 
-This command installs dev dependencies and runs type checks (`mypy`), tests, and package build checks.
+The script is pinned to `./.venv/bin/python` and fails fast if the project venv is missing.
+By default it runs validation only (no dependency install), which avoids mutating global interpreters.
+If you need to install/update dev dependencies first, run:
+
+```bash
+bash scripts/preflight.sh --install
+```
+
+Validation covers type checks (`mypy`), tests, and package build checks.
 Current static gates target type checks on `src/openbridge/workflows.py`.
 It also runs a config/docs drift check to keep runtime-sensitive defaults aligned with `config/opencode-bridge.env.example` and `config/example.yaml`.
 
@@ -487,13 +495,14 @@ python -m build --sdist --wheel
 
 ## Deployment Preflight
 
-Run one command to install dev tooling, run canonical tests, and verify package builds:
+Run one command to execute canonical checks and verify package builds:
 
 ```bash
 ./scripts/preflight.sh
 ```
 
-The script uses `python -m pip`, `python -m pytest`, and `python -m build` to avoid interpreter drift.
+The script always uses `./.venv/bin/python` and will fail if the venv is missing.
+Use `./scripts/preflight.sh --install` only when you explicitly want to install/update local dev dependencies.
 
 ## Legacy unittest Command
 
