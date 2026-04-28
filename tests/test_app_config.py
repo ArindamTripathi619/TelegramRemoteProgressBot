@@ -14,6 +14,7 @@ from src.openbridge.app import (
     _build_opencode_systemd_unit,
     _build_systemd_unit,
     _install_missing_dependencies,
+    deploy_validate_command,
     _load_banner_text,
     _load_pid,
     _merged_config,
@@ -319,6 +320,73 @@ class TestAppConfig(unittest.TestCase):
 
         self.assertEqual(parsed.command, "render-systemd")
         self.assertEqual(parsed.func.__name__, "render_systemd_command")
+
+    def test_parser_includes_deploy_validate_command(self):
+        parser = build_parser()
+
+        parsed = parser.parse_args(["deploy-validate", "--workspace", "."])
+
+        self.assertEqual(parsed.command, "deploy-validate")
+        self.assertEqual(parsed.func.__name__, "deploy_validate_command")
+
+    def test_deploy_validate_command_reports_success(self):
+        from src.openbridge import app as app_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace_dir = Path(temp_dir) / "workspace"
+            workspace_dir.mkdir()
+            config_path = Path(temp_dir) / "bridge.env"
+            opencode_env = Path(temp_dir) / "opencode.env"
+            write_env_file(
+                config_path,
+                {
+                    "TELEGRAM_BOT_TOKEN": "123:token",
+                    "OPENCODE_MODEL": "opencode/big-pickle",
+                    "OPENCODE_WORKING_DIR": str(workspace_dir),
+                    "OPENCODE_TIMEOUT_SECONDS": "600",
+                    "OPENCODE_MAX_CONCURRENT": "1",
+                    "TELEGRAM_ALLOWED_CHAT_IDS": "123456789",
+                },
+            )
+            write_env_file(opencode_env, {"OPENCODE_SERVER_USERNAME": "opencode"})
+
+            buffer = io.StringIO()
+            with patch.object(app_module, "CONFIG_FILE", config_path), patch.object(
+                app_module, "OPENCODE_CONFIG_FILE", opencode_env
+            ), patch("builtins.print") as mock_print:
+                deploy_validate_command(Mock(config=config_path, workspace=workspace_dir))
+
+            printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
+            self.assertIn("Deployment validation passed", printed)
+
+    def test_deploy_validate_command_fails_on_missing_workspace(self):
+        from src.openbridge import app as app_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace_dir = Path(temp_dir) / "workspace"
+            config_path = Path(temp_dir) / "bridge.env"
+            opencode_env = Path(temp_dir) / "opencode.env"
+            write_env_file(
+                config_path,
+                {
+                    "TELEGRAM_BOT_TOKEN": "123:token",
+                    "OPENCODE_MODEL": "opencode/big-pickle",
+                    "OPENCODE_WORKING_DIR": str(workspace_dir),
+                    "OPENCODE_TIMEOUT_SECONDS": "600",
+                    "OPENCODE_MAX_CONCURRENT": "1",
+                    "TELEGRAM_ALLOWED_CHAT_IDS": "123456789",
+                },
+            )
+            write_env_file(opencode_env, {"OPENCODE_SERVER_USERNAME": "opencode"})
+
+            with patch.object(app_module, "CONFIG_FILE", config_path), patch.object(
+                app_module, "OPENCODE_CONFIG_FILE", opencode_env
+            ), patch("builtins.print") as mock_print, self.assertRaises(SystemExit) as exc:
+                deploy_validate_command(Mock(config=config_path, workspace=workspace_dir))
+
+            self.assertEqual(exc.exception.code, 1)
+            printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
+            self.assertIn("OpenCode working dir does not exist", printed)
 
     def test_show_banner_prints_colored_ascii_art(self):
         from src.openbridge import app as app_module

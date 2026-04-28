@@ -654,6 +654,63 @@ def workflows_validate_command(args: argparse.Namespace) -> None:
     print(f"Workflows file is valid: {workflows_file}")
 
 
+def deploy_validate_command(args: argparse.Namespace) -> None:
+    config_path = Path(getattr(args, "config", CONFIG_FILE))
+    workspace_dir = Path(getattr(args, "workspace", Path.cwd())).resolve()
+
+    if not config_path.exists():
+        print(f"Config not found: {config_path}")
+        raise SystemExit(1)
+
+    try:
+        config = _merged_config(config_path)
+    except Exception as exc:
+        print(f"Deployment validation error: {exc}")
+        raise SystemExit(1)
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not workspace_dir.exists():
+        errors.append(f"Workspace not found: {workspace_dir}")
+    elif not workspace_dir.is_dir():
+        errors.append(f"Workspace is not a directory: {workspace_dir}")
+
+    working_dir = Path(config.opencode_working_dir).expanduser()
+    if not working_dir.exists():
+        errors.append(f"OpenCode working dir does not exist: {working_dir}")
+    elif not working_dir.is_dir():
+        errors.append(f"OpenCode working dir is not a directory: {working_dir}")
+
+    if not OPENCODE_CONFIG_FILE.exists():
+        errors.append(f"OpenCode service env not found: {OPENCODE_CONFIG_FILE}")
+
+    if config.allow_all_chats and config.allowed_chat_ids:
+        warnings.append("TELEGRAM_ALLOW_ALL_CHATS overrides TELEGRAM_ALLOWED_CHAT_IDS")
+    elif not config.allow_all_chats and not config.allowed_chat_ids:
+        warnings.append(
+            "TELEGRAM_ALLOWED_CHAT_IDS is empty; the bot will reject all chats unless TELEGRAM_ALLOW_ALL_CHATS is set"
+        )
+
+    rendered_units = _render_systemd_units(workspace_dir)
+    unit_text = rendered_units[SYSTEMD_UNIT_NAME]
+    opencode_unit_text = rendered_units[OPENCODE_SYSTEMD_UNIT_NAME]
+    if f"WorkingDirectory={workspace_dir}" not in unit_text:
+        errors.append(f"Rendered {SYSTEMD_UNIT_NAME} does not target the requested workspace")
+    if f"WorkingDirectory={workspace_dir}" not in opencode_unit_text:
+        errors.append(f"Rendered {OPENCODE_SYSTEMD_UNIT_NAME} does not target the requested workspace")
+
+    for warning in warnings:
+        print(f"Warning: {warning}")
+
+    if errors:
+        for error in errors:
+            print(f"Deployment validation error: {error}")
+        raise SystemExit(1)
+
+    print(f"Deployment validation passed for {workspace_dir}")
+
+
 def workflows_list_command(args: argparse.Namespace) -> None:
     workflows_file = Path(getattr(args, "workflows_file", WORKFLOWS_FILE))
     state_file = Path(getattr(args, "state_file", WORKFLOWS_STATE_FILE))
@@ -1244,6 +1301,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Workspace directory to resolve into the rendered units",
     )
     render_systemd_parser.set_defaults(func=render_systemd_command)
+
+    deploy_validate_parser = subparsers.add_parser(
+        "deploy-validate",
+        help="Validate deployment config, workspace, and service paths",
+    )
+    deploy_validate_parser.add_argument("--config", type=Path, default=CONFIG_FILE, help="Path to config env file")
+    deploy_validate_parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path.cwd(),
+        help="Workspace directory to validate for systemd units",
+    )
+    deploy_validate_parser.set_defaults(func=deploy_validate_command)
 
     uninstall_systemd_parser = subparsers.add_parser("uninstall-systemd", help="Remove the user systemd unit")
     uninstall_systemd_parser.set_defaults(func=uninstall_systemd_command)

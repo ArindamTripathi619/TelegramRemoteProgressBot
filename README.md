@@ -128,6 +128,7 @@ openbridge setup
 ```
 
 `openbridge setup` writes the bridge config and installs the user OpenCode service from the same env file when `systemctl --user` is available.
+Before enabling the service, run `openbridge deploy-validate --workspace <repo-root>` to check config completeness, service path safety, and allowlist semantics.
 
 3. Run the bot:
 
@@ -244,6 +245,7 @@ openbridge --version
 
 - disables both services
 - removes both unit files from user systemd directory
+- run `openbridge deploy-validate --workspace <repo-root>` before enabling the service to catch missing config or path issues early
 
 `openbridge workflows`:
 
