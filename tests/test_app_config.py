@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch, call
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.openbridge.app import (
+    OPENCODE_CONFIG_FILE,
     _build_opencode_systemd_unit,
     _build_systemd_unit,
     _install_missing_dependencies,
@@ -17,6 +18,7 @@ from src.openbridge.app import (
     _load_pid,
     _merged_config,
     _missing_dependencies,
+    _sync_opencode_env_from_bridge_config,
     _show_banner,
     build_parser,
     get_resource_path,
@@ -189,7 +191,57 @@ class TestAppConfig(unittest.TestCase):
 
         self.assertIn("OpenCode API Server", unit_text)
         self.assertIn("opencode serve --hostname 127.0.0.1 --port 4096", unit_text)
-        self.assertIn("EnvironmentFile=", unit_text)
+        self.assertIn(f"EnvironmentFile={OPENCODE_CONFIG_FILE}", unit_text)
+
+    def test_sync_opencode_env_contains_only_service_keys(self):
+        from src.openbridge import app as app_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bridge_env = Path(temp_dir) / "bridge.env"
+            opencode_env = Path(temp_dir) / "opencode.env"
+            write_env_file(
+                bridge_env,
+                {
+                    "TELEGRAM_BOT_TOKEN": "123:token",
+                    "OPENBRIDGE_INPUT_LLM_API_KEY": "sk-secret",
+                    "OPENCODE_API_USERNAME": "opencode",
+                    "OPENCODE_API_PASSWORD": "api-password",
+                    "OPENCODE_SERVER_USERNAME": "server-user",
+                    "OPENCODE_SERVER_PASSWORD": "server-password",
+                },
+            )
+
+            with patch.object(app_module, "OPENCODE_CONFIG_FILE", opencode_env):
+                _sync_opencode_env_from_bridge_config(bridge_env)
+
+            loaded = read_env_file(opencode_env)
+            self.assertEqual(loaded.get("OPENCODE_SERVER_USERNAME"), "server-user")
+            self.assertEqual(loaded.get("OPENCODE_SERVER_PASSWORD"), "server-password")
+            self.assertEqual(loaded.get("OPENCODE_API_USERNAME"), "opencode")
+            self.assertEqual(loaded.get("OPENCODE_API_PASSWORD"), "api-password")
+            self.assertNotIn("TELEGRAM_BOT_TOKEN", loaded)
+            self.assertNotIn("OPENBRIDGE_INPUT_LLM_API_KEY", loaded)
+
+    def test_sync_opencode_env_falls_back_to_api_auth(self):
+        from src.openbridge import app as app_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bridge_env = Path(temp_dir) / "bridge.env"
+            opencode_env = Path(temp_dir) / "opencode.env"
+            write_env_file(
+                bridge_env,
+                {
+                    "OPENCODE_API_USERNAME": "api-user",
+                    "OPENCODE_API_PASSWORD": "api-pass",
+                },
+            )
+
+            with patch.object(app_module, "OPENCODE_CONFIG_FILE", opencode_env):
+                _sync_opencode_env_from_bridge_config(bridge_env)
+
+            loaded = read_env_file(opencode_env)
+            self.assertEqual(loaded.get("OPENCODE_SERVER_USERNAME"), "api-user")
+            self.assertEqual(loaded.get("OPENCODE_SERVER_PASSWORD"), "api-pass")
 
     def test_version_flag_prints_release_version(self):
         parser = build_parser()

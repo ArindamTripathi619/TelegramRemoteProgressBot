@@ -31,6 +31,7 @@ from .workflows import (
 
 APP_DIR = Path.home() / ".config" / "openbridge"
 CONFIG_FILE = APP_DIR / "bridge.env"
+OPENCODE_CONFIG_FILE = APP_DIR / "opencode.env"
 LOG_FILE = APP_DIR / "openbridge.log"
 PID_FILE = APP_DIR / "openbridge.pid"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
@@ -121,6 +122,15 @@ SENSITIVE_CONFIG_KEYS = (
     "OPENBRIDGE_OUTPUT_LLM_API_KEY",
     "OPENBRIDGE_DECORATOR_API_KEY",
 )
+
+OPENCODE_SERVICE_CONFIG_KEYS = [
+    "OPENCODE_SERVER_USERNAME",
+    "OPENCODE_SERVER_PASSWORD",
+    "OPENCODE_SERVER_PASSWORD_FILE",
+    "OPENCODE_API_USERNAME",
+    "OPENCODE_API_PASSWORD",
+    "OPENCODE_API_PASSWORD_FILE",
+]
 
 
 def _read_secret_from_file(path_value: str) -> str:
@@ -217,6 +227,43 @@ def write_env_file(path: Path, data: Dict[str, str]) -> None:
             lines.append(f"export {key}={_format_env_value(value)}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     os.chmod(path, 0o600)
+
+
+def _write_opencode_env_file(path: Path, data: Dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    lines = ["# OpenCode service configuration"]
+    for key in OPENCODE_SERVICE_CONFIG_KEYS:
+        value = data.get(key, "")
+        if value:
+            lines.append(f"export {key}={_format_env_value(value)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.chmod(path, 0o600)
+
+
+def _sync_opencode_env_from_bridge_config(config_path: Path = CONFIG_FILE) -> None:
+    bridge_data = _with_legacy_openbridge_aliases(read_env_file(config_path))
+    opencode_data: Dict[str, str] = {}
+
+    for key in OPENCODE_SERVICE_CONFIG_KEYS:
+        value = bridge_data.get(key, "").strip()
+        if value:
+            opencode_data[key] = value
+
+    # Backward compatibility: if server auth values are missing, reuse API auth.
+    if "OPENCODE_SERVER_USERNAME" not in opencode_data:
+        fallback = bridge_data.get("OPENCODE_API_USERNAME", "").strip()
+        if fallback:
+            opencode_data["OPENCODE_SERVER_USERNAME"] = fallback
+    if "OPENCODE_SERVER_PASSWORD" not in opencode_data and "OPENCODE_SERVER_PASSWORD_FILE" not in opencode_data:
+        fallback_secret = bridge_data.get("OPENCODE_API_PASSWORD", "").strip()
+        fallback_secret_file = bridge_data.get("OPENCODE_API_PASSWORD_FILE", "").strip()
+        if fallback_secret:
+            opencode_data["OPENCODE_SERVER_PASSWORD"] = fallback_secret
+        elif fallback_secret_file:
+            opencode_data["OPENCODE_SERVER_PASSWORD_FILE"] = fallback_secret_file
+
+    _write_opencode_env_file(OPENCODE_CONFIG_FILE, opencode_data)
 
 
 def _with_legacy_openbridge_aliases(data: Dict[str, str]) -> Dict[str, str]:
@@ -388,7 +435,7 @@ def _build_opencode_systemd_unit(workspace_dir: Path) -> str:
         "[Service]\n"
         "Type=simple\n"
         f"WorkingDirectory={workspace_dir}\n"
-        f"EnvironmentFile={CONFIG_FILE}\n"
+        f"EnvironmentFile={OPENCODE_CONFIG_FILE}\n"
         f"ExecStart={opencode_executable} serve --hostname 127.0.0.1 --port 4096\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
@@ -488,11 +535,13 @@ def _install_opencode_systemd_unit(workspace_dir: Path) -> None:
     OPENCODE_SYSTEMD_UNIT_FILE.write_text(_build_opencode_systemd_unit(workspace_dir), encoding="utf-8")
 
 
-def _ensure_opencode_service(workspace_dir: Path) -> None:
-    if not CONFIG_FILE.exists():
-        print(f"Config not found: {CONFIG_FILE}")
+def _ensure_opencode_service(workspace_dir: Path, config_path: Path = CONFIG_FILE) -> None:
+    if not config_path.exists():
+        print(f"Config not found: {config_path}")
         print("Run: openbridge setup")
         raise SystemExit(1)
+
+    _sync_opencode_env_from_bridge_config(config_path)
 
     _install_opencode_systemd_unit(workspace_dir)
 
@@ -667,6 +716,8 @@ def install_systemd_command(args: argparse.Namespace) -> None:
         print(f"Config not found: {CONFIG_FILE}")
         print("Run: openbridge setup")
         raise SystemExit(1)
+
+    _sync_opencode_env_from_bridge_config(CONFIG_FILE)
 
     SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
     _install_opencode_systemd_unit(workspace_dir)
@@ -868,6 +919,9 @@ def setup_command(_: argparse.Namespace) -> None:
     write_env_file(CONFIG_FILE, config)
     print(f"Saved configuration to {CONFIG_FILE}")
 
+    _sync_opencode_env_from_bridge_config(CONFIG_FILE)
+    print(f"Saved OpenCode service configuration to {OPENCODE_CONFIG_FILE}")
+
     workspace_dir = Path(config["OPENCODE_WORKING_DIR"]).resolve()
     if shutil.which("systemctl") is not None:
         try:
@@ -906,7 +960,7 @@ def start_command(args: argparse.Namespace) -> None:
     if shutil.which("systemctl") is not None:
         try:
             if not OPENCODE_SYSTEMD_UNIT_FILE.exists():
-                _ensure_opencode_service(Path(config.opencode_working_dir).resolve())
+                _ensure_opencode_service(Path(config.opencode_working_dir).resolve(), config_path=config_path)
             else:
                 _ensure_opencode_running()
         except Exception as exc:

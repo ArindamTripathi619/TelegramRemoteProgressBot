@@ -285,7 +285,7 @@ Template examples:
 
 ## Setup Wizard
 
-`openbridge setup` writes `~/.config/openbridge/bridge.env` and configures:
+`openbridge setup` writes `~/.config/openbridge/bridge.env` for the bridge and `~/.config/openbridge/opencode.env` for the OpenCode service, then configures:
 
 - preflight check for required CLI tools (`npm`, `npx`, `opencode`, `gws`, `gws-mcp-server`)
 - optional install prompt for missing dependencies
@@ -363,7 +363,10 @@ If you want the wizard to manage the OpenCode daemon automatically, also provide
 - `OPENCODE_SERVER_USERNAME`
 - `OPENCODE_SERVER_PASSWORD`
 
-Note: the same env file is used by both bridge and OpenCode user services.
+Note: bridge and OpenCode now use separate env files for least privilege:
+
+- Bridge: `~/.config/openbridge/bridge.env`
+- OpenCode service: `~/.config/openbridge/opencode.env`
 
 ## Bot Commands
 

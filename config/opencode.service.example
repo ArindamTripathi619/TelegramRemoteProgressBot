@@ -6,7 +6,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/<path-to-openbridge-workspace>
-EnvironmentFile=%h/.config/openbridge/bridge.env
+EnvironmentFile=%h/.config/openbridge/opencode.env
 ExecStart=opencode serve --hostname 127.0.0.1 --port 4096
 Restart=on-failure
 RestartSec=5
