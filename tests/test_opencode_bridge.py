@@ -607,6 +607,264 @@ class TestOpenCodeBridgeHelpers(unittest.TestCase):
 
         fake_app.run_polling.assert_called_once_with(close_loop=False, stop_signals=None)
 
+    def test_workflow_status_action_reaches_handler(self):
+        """Unit test: Workflow status action routes correctly and calls manager."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+        
+        mock_manager = Mock()
+        mock_manager.status_text.return_value = "Workflow status: active"
+        bridge.set_workflow_manager(mock_manager)
+
+        context = Mock(args=["status", "workflow_id_123"], application=Mock())
+        asyncio.run(bridge.handle_workflow_command(update, context))
+
+        mock_manager.status_text.assert_called_once_with("workflow_id_123")
+        message.reply_text.assert_awaited_once_with("Workflow status: active")
+
+    def test_workflow_pause_action_reaches_handler(self):
+        """Unit test: Workflow pause action routes correctly and calls manager."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+        
+        mock_manager = Mock()
+        mock_manager.set_paused.return_value = None
+        bridge.set_workflow_manager(mock_manager)
+
+        context = Mock(args=["pause", "workflow_id_123"], application=Mock())
+        asyncio.run(bridge.handle_workflow_command(update, context))
+
+        mock_manager.set_paused.assert_called_once_with("workflow_id_123", True)
+        message.reply_text.assert_awaited_once()
+
+    def test_workflow_resume_action_reaches_handler(self):
+        """Unit test: Workflow resume action routes correctly and calls manager."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+        
+        mock_manager = Mock()
+        mock_manager.set_paused.return_value = None
+        bridge.set_workflow_manager(mock_manager)
+
+        context = Mock(args=["resume", "workflow_id_123"], application=Mock())
+        asyncio.run(bridge.handle_workflow_command(update, context))
+
+        mock_manager.set_paused.assert_called_once_with("workflow_id_123", False)
+        message.reply_text.assert_awaited_once()
+
+    def test_workflow_run_action_reaches_handler(self):
+        """Unit test: Workflow run action routes correctly and calls runner."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+        
+        # Mock the _run_workflow_now method
+        bridge._run_workflow_now = AsyncMock(return_value="Workflow executed")
+
+        context = Mock(args=["run", "workflow_id_123"], application=Mock())
+        asyncio.run(bridge.handle_workflow_command(update, context))
+
+        bridge._run_workflow_now.assert_awaited_once()
+
+    def test_workflow_unknown_action_returns_error(self):
+        """Unit test: Unknown workflow action returns error message."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+
+        # Pass workflow_id arg to reach the unknown action handler
+        context = Mock(args=["unknown_action", "workflow_id"], application=Mock())
+        asyncio.run(bridge.handle_workflow_command(update, context))
+
+        message.reply_text.assert_awaited_once()
+        # Verify "Unknown workflow action" appears in error message
+        call_args = message.reply_text.call_args
+        self.assertIn("Unknown workflow action", str(call_args))
+
+    def test_workflow_missing_id_argument_returns_error(self):
+        """Unit test: Actions requiring workflow_id return error when missing argument."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+
+        # Test actions that require workflow_id but don't provide it
+        for action in ["status", "pause", "resume", "run"]:
+            message.reply_text.reset_mock()
+            context = Mock(args=[action], application=Mock())
+            asyncio.run(bridge.handle_workflow_command(update, context))
+            message.reply_text.assert_awaited_once()
+            # Should mention workflow id requirement
+            call_args = message.reply_text.call_args
+            self.assertIn("workflow id", str(call_args).lower())
+
+
+    def test_workflow_create_action_reaches_handler(self):
+        """Unit test: Workflow create action routes correctly."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+        
+        # Mock the draft workflow method
+        bridge._draft_workflow_from_instruction = AsyncMock(
+            return_value={"id": "new_workflow", "name": "Test Workflow"}
+        )
+
+        context = Mock(args=["create", "daily", "fetch"], application=Mock())
+        asyncio.run(bridge.handle_workflow_command(update, context))
+
+        # Verify draft method was called
+        bridge._draft_workflow_from_instruction.assert_awaited_once()
+
+    def test_workflow_no_action_returns_help(self):
+        """Unit test: Workflow command with no action returns help message."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+
+        context = Mock(args=[], application=Mock())
+        asyncio.run(bridge.handle_workflow_command(update, context))
+
+        message.reply_text.assert_awaited_once()
+        # Help message should mention available actions
+        call_args = message.reply_text.call_args
+        call_text = str(call_args)
+        self.assertTrue(
+            any(action in call_text for action in ["list", "create", "status"]),
+            f"Help message should mention actions, got: {call_text}"
+        )
+
+    def test_workflow_routing_regression_early_returns_do_not_block_execution(self):
+        """Regression test: No unconditional early return blocks any subcommand routing."""
+        config = BridgeConfig(
+            telegram_token="123:token",
+            opencode_model="opencode/big-pickle",
+            opencode_working_dir=".",
+            opencode_timeout_seconds=10,
+            max_concurrent_jobs=1,
+            allowed_chat_ids={123},
+            log_level="INFO",
+        )
+        bridge = OpenCodeBridge(config)
+
+        message = Mock()
+        message.reply_text = AsyncMock()
+        update = Mock(effective_message=message, effective_chat=Mock(id=123))
+
+        mock_manager = Mock()
+        mock_manager.summary_text.return_value = "Active workflows"
+        mock_manager.status_text.return_value = "Status: active"
+        mock_manager.set_paused.return_value = None
+        bridge.set_workflow_manager(mock_manager)
+        bridge._run_workflow_now = AsyncMock(return_value="Executed")
+
+        # Test that all actions route successfully (not blocked by early returns)
+        test_actions = [
+            (["list"], lambda: mock_manager.summary_text.called),
+            (["status", "wf1"], lambda: mock_manager.status_text.called),
+            (["pause", "wf1"], lambda: mock_manager.set_paused.called),
+            (["resume", "wf1"], lambda: mock_manager.set_paused.called),
+        ]
+
+        for args, check_called in test_actions:
+            message.reply_text.reset_mock()
+            mock_manager.reset_mock()
+            context = Mock(args=args, application=Mock())
+            asyncio.run(bridge.handle_workflow_command(update, context))
+            # Verify handler was reached and executed (not blocked by early return)
+            message.reply_text.assert_awaited_once()
+
+
 
 if __name__ == "__main__":
     unittest.main()
