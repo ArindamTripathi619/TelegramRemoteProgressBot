@@ -235,5 +235,52 @@ class TestWorkflows(unittest.TestCase):
             self.assertTrue(any("more than 10 steps" in error for error in errors))
 
 
+    def test_save_workflows_applies_restrictive_file_permissions(self):
+        """Test: save_workflows() applies 0600 permissions to workflow file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workflows_file = Path(temp_dir) / "workflows.json"
+            payload = sample_workflows()
+
+            save_workflows(workflows_file, payload)
+
+            # Verify file exists
+            self.assertTrue(workflows_file.exists())
+
+            # Verify file has restrictive permissions (rw-------)
+            file_stat = workflows_file.stat()
+            file_mode = file_stat.st_mode & 0o777
+            self.assertEqual(file_mode, 0o600, f"Expected file mode 0o600, got {oct(file_mode)}")
+
+            # Verify parent directory has 0o700 permissions (rwx------)
+            parent_stat = workflows_file.parent.stat()
+            parent_mode = parent_stat.st_mode & 0o777
+            self.assertEqual(parent_mode, 0o700, f"Expected parent mode 0o700, got {oct(parent_mode)}")
+
+    def test_workflow_state_save_applies_restrictive_file_permissions(self):
+        """Test: WorkflowStateStore.save() applies 0600 permissions to state file."""
+        from src.openbridge.workflows import WorkflowStateStore
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "workflows-state.json"
+            store = WorkflowStateStore(state_file)
+
+            # Add a workflow state and save
+            store.get("test_workflow").run_count = 5
+            store.save()
+
+            # Verify file exists
+            self.assertTrue(state_file.exists())
+
+            # Verify file has restrictive permissions (rw-------)
+            file_stat = state_file.stat()
+            file_mode = file_stat.st_mode & 0o777
+            self.assertEqual(file_mode, 0o600, f"Expected file mode 0o600, got {oct(file_mode)}")
+
+            # Verify parent directory has 0o700 permissions (rwx------)
+            parent_stat = state_file.parent.stat()
+            parent_mode = parent_stat.st_mode & 0o777
+            self.assertEqual(parent_mode, 0o700, f"Expected parent mode 0o700, got {oct(parent_mode)}")
+
+
 if __name__ == "__main__":
     unittest.main()

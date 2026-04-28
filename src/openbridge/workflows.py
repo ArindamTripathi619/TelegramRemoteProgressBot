@@ -5,6 +5,7 @@ import html
 import json
 import logging
 import ipaddress
+import os
 import re
 import time
 import zlib
@@ -197,6 +198,8 @@ class WorkflowStateStore:
             }
         }
         self.state_file.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.chmod(self.state_file.parent, 0o700)
+        os.chmod(self.state_file, 0o600)
 
     def get(self, workflow_id: str) -> WorkflowState:
         if workflow_id not in self._state:
@@ -474,6 +477,8 @@ def sample_workflows() -> Dict[str, Any]:
 def save_workflows(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(path.parent, 0o700)
+    os.chmod(path, 0o600)
 
 
 class WorkflowManager:
