@@ -236,6 +236,9 @@ openbridge --version
 
 - writes both `openbridge.service` and `opencode.service`
 - can enable and optionally start both services
+- generated units use `TimeoutStartSec=2min`, `TimeoutStopSec=30s`, `RestartSec=5s`, `StartLimitIntervalSec=60s`, `StartLimitBurst=5`, and `StartLimitAction=none`
+- watchdog support is disabled by default (`WatchdogSec=0`) because the services do not emit watchdog keepalive notifications
+- under repeated startup failures, systemd backs off for 5 seconds between restarts and then leaves the unit failed once the burst limit is hit
 
 `openbridge uninstall-systemd`:
 
